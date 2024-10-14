@@ -104,7 +104,7 @@ To run the project locally, follow these steps:
 ![Alt text](https://github.com/afthab-anthas/pluspoint-edu/blob/5ab00eb1a4f476abc2bf1e3668ea14ccff1157ad/public/images/OUTPUT/BLOGS%20PAGE.png)
 ![Alt text](https://github.com/afthab-anthas/pluspoint-edu/blob/5ab00eb1a4f476abc2bf1e3668ea14ccff1157ad/public/images/OUTPUT/BLOGS%20LIST.png)
 ![Alt text](https://github.com/afthab-anthas/pluspoint-edu/blob/5ab00eb1a4f476abc2bf1e3668ea14ccff1157ad/public/images/OUTPUT/REGISTER%20PAGE.png)
-![Alt text]([https://github.com/afthab-anthas/pluspoint-edu/blob/5ab00eb1a4f476abc2bf1e3668ea14ccff1157ad/public/images/OUTPUT/HOME%20PAGE.png](https://github.com/afthab-anthas/pluspoint-edu/blob/5ab00eb1a4f476abc2bf1e3668ea14ccff1157ad/public/images/OUTPUT/LOGIN%20PAGE.png))
+![Alt text](https://github.com/afthab-anthas/pluspoint-edu/blob/5ab00eb1a4f476abc2bf1e3668ea14ccff1157ad/public/images/OUTPUT/LOGIN%20PAGE.png)
 ![Alt text](https://github.com/afthab-anthas/pluspoint-edu/blob/5ab00eb1a4f476abc2bf1e3668ea14ccff1157ad/public/images/OUTPUT/CONTACT%20PAGE.png)
 ![Alt text](https://github.com/afthab-anthas/pluspoint-edu/blob/5ab00eb1a4f476abc2bf1e3668ea14ccff1157ad/public/images/OUTPUT/ADMIN%20DASHBOARD.png)
 ![Alt text](https://github.com/afthab-anthas/pluspoint-edu/blob/5ab00eb1a4f476abc2bf1e3668ea14ccff1157ad/public/images/OUTPUT/ADMIN%20BLOGS%20PAGE.png)

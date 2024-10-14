@@ -99,6 +99,14 @@ To run the project locally, follow these steps:
 
 
 ## 🍿 Live Website
-<img src="public/assets/images/logomain-D82XgayM.png" width="auto" height="300px" alt="Pluspoint Logo">
+![Alt text](https://github.com/afthab-anthas/pluspoint-edu/blob/5ab00eb1a4f476abc2bf1e3668ea14ccff1157ad/public/images/OUTPUT/HOME%20PAGE.png)
+![Alt text](https://github.com/afthab-anthas/pluspoint-edu/blob/5ab00eb1a4f476abc2bf1e3668ea14ccff1157ad/public/images/OUTPUT/STUDENT%20PAGE.png)
+![Alt text](https://github.com/afthab-anthas/pluspoint-edu/blob/5ab00eb1a4f476abc2bf1e3668ea14ccff1157ad/public/images/OUTPUT/BLOGS%20PAGE.png)
+![Alt text](https://github.com/afthab-anthas/pluspoint-edu/blob/5ab00eb1a4f476abc2bf1e3668ea14ccff1157ad/public/images/OUTPUT/BLOGS%20LIST.png)
+![Alt text](https://github.com/afthab-anthas/pluspoint-edu/blob/5ab00eb1a4f476abc2bf1e3668ea14ccff1157ad/public/images/OUTPUT/REGISTER%20PAGE.png)
+![Alt text]([https://github.com/afthab-anthas/pluspoint-edu/blob/5ab00eb1a4f476abc2bf1e3668ea14ccff1157ad/public/images/OUTPUT/HOME%20PAGE.png](https://github.com/afthab-anthas/pluspoint-edu/blob/5ab00eb1a4f476abc2bf1e3668ea14ccff1157ad/public/images/OUTPUT/LOGIN%20PAGE.png))
+![Alt text](https://github.com/afthab-anthas/pluspoint-edu/blob/5ab00eb1a4f476abc2bf1e3668ea14ccff1157ad/public/images/OUTPUT/CONTACT%20PAGE.png)
+![Alt text](https://github.com/afthab-anthas/pluspoint-edu/blob/5ab00eb1a4f476abc2bf1e3668ea14ccff1157ad/public/images/OUTPUT/ADMIN%20DASHBOARD.png)
+![Alt text](https://github.com/afthab-anthas/pluspoint-edu/blob/5ab00eb1a4f476abc2bf1e3668ea14ccff1157ad/public/images/OUTPUT/ADMIN%20BLOGS%20PAGE.png)
 
 > **Disclaimer:** This project was developed for Expert Recruitment Services UAE. The code and content on this site are for educational purposes only and should not be used or reproduced without permission. Unauthorized use may result in legal consequences. By accessing this codebase, you agree to use the information responsibly by accomplying to the company's regulations.

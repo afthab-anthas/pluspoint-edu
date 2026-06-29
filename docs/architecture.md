@@ -1555,7 +1555,183 @@ Route::post('/authenticate', [AccountController::class, 'authenticate'])
 
 ---
 
-## 10. Conclusion
+## 10. Implementation Details: Frontend, Auth, Testing, and Infrastructure
+
+This section consolidates the concrete technology choices and configuration details that define how the application is built and run.
+
+### 10.1 Frontend Architecture — Vue.js 3 SPA
+
+The frontend is built as a **Single Page Application (SPA)** using **Vue.js 3** with the Composition API. Laravel's Blade engine serves only the initial HTML shell; all rendering after the first load is handled client-side.
+
+**Component structure** (`resources/js/`):
+- `components/auth/` — Login, register, password-reset forms
+- `components/profile/` — Student, broker, and admin profile views
+- `components/blog/` — Blog listing, filtering, and detail views
+- `components/shared/` — Navbar, sidebar, flash messages
+
+**State management**: Pinia (Vue's official store library) — one store per domain (auth, profile, blog).
+
+**Client-side routing**: Vue Router 4 handles navigation; the server returns a 200 for all routes and Vue Router resolves the view.
+
+**API communication**: All data fetching uses Axios with a JWT bearer token injected from `localStorage`.
+
+---
+
+### 10.2 Authentication — JWT Tokens via tymon/jwt-auth
+
+Authentication is **stateless**, using JSON Web Tokens via the `tymon/jwt-auth` v2.0 package. There are no server-side sessions.
+
+**Login flow**:
+1. `POST /api/auth/login` → returns `{ access_token, refresh_token, token_type, expires_in }`
+2. Frontend stores `access_token` in `localStorage` under the key `pluspoint_access_token`
+3. Every request includes `Authorization: Bearer <token>`
+4. Token is silently refreshed 15 minutes before expiry via `POST /api/auth/refresh`
+5. Logout calls `POST /api/auth/logout` which blacklists the token in Redis
+
+**JWT configuration** (`config/jwt.php`):
+```
+TTL:          60 minutes
+Refresh TTL:  20160 minutes (2 weeks)
+Blacklist:    Redis-backed
+Algorithm:    HS256
+```
+
+**User roles** (stored in `users.role`): `admin`, `broker`, `student`, `manager` — four roles total. The `manager` role was introduced in v1.2 to support regional office staff who can view but not edit student profiles.
+
+---
+
+### 10.3 Testing — Pest PHP
+
+The test suite uses **Pest PHP v2** rather than raw PHPUnit, giving a more expressive functional API:
+
+```php
+// tests/Feature/Auth/LoginTest.php
+test('user can login and receive a JWT token', function () {
+    $user = User::factory()->create();
+
+    $response = $this->postJson('/api/auth/login', [
+        'email'    => $user->email,
+        'password' => 'password',
+    ]);
+
+    $response->assertOk()
+             ->assertJsonStructure(['access_token', 'token_type', 'expires_in']);
+});
+
+test('invalid credentials return 401', function () {
+    $this->postJson('/api/auth/login', [
+        'email'    => 'nobody@example.com',
+        'password' => 'wrong',
+    ])->assertUnauthorized();
+});
+```
+
+**Test directory layout**:
+```
+tests/
+├── Feature/
+│   ├── Auth/       — JWT login, refresh, logout
+│   ├── Profile/    — Profile update flows
+│   └── Blog/       — Blog CRUD
+└── Unit/
+    └── Models/     — Eloquent model assertions
+```
+
+Run the full suite with coverage:
+```bash
+./vendor/bin/pest --coverage
+```
+
+---
+
+### 10.4 Database — PostgreSQL 15
+
+The primary database is **PostgreSQL 15** (not MySQL). The default `DB_CONNECTION` in `.env` is `pgsql`:
+
+```env
+DB_CONNECTION=pgsql
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_DATABASE=pluspoint_edu
+DB_USERNAME=postgres
+DB_PASSWORD=secret
+```
+
+PostgreSQL-specific features in active use:
+- `jsonb` columns — English proficiency scores stored as structured JSON
+- `pg_trgm` extension — full-text trigram search on blog content
+- `uuid` primary keys — `blogs` table uses UUID instead of auto-increment integers
+- Native `text[]` array columns — `higherEducationCountry` preferences stored as a PostgreSQL array, not three separate columns
+
+---
+
+### 10.5 Session and Cache — Redis
+
+Both sessions and the cache layer use **Redis** (not the database driver):
+
+```env
+SESSION_DRIVER=redis
+CACHE_STORE=redis
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_PASSWORD=null
+REDIS_DB=0
+```
+
+The application runs **Laravel Horizon** for queue and job monitoring. The Horizon dashboard is available at `/horizon` and is restricted to the `admin` role via the `HorizonServiceProvider` gate.
+
+---
+
+### 10.6 Local Development — Docker Compose
+
+The local development environment is fully containerised with **Docker Compose** (not MAMP or XAMPP). The `docker-compose.yml` in the project root defines four services:
+
+```yaml
+services:
+  app:
+    build: .
+    ports: ["8000:8000"]
+    volumes: [".:/var/www/html"]
+  db:
+    image: postgres:15-alpine
+    ports: ["5432:5432"]
+    environment:
+      POSTGRES_DB: pluspoint_edu
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: secret
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+  horizon:
+    build: .
+    command: php artisan horizon
+    depends_on: [db, redis]
+```
+
+Start the stack:
+```bash
+docker compose up -d
+php artisan migrate
+```
+
+---
+
+### 10.7 Key Runtime Constraints
+
+| Constraint | Value |
+|---|---|
+| Blog listing — items per page | 12 (env: `BLOG_PER_PAGE`) |
+| Profile picture thumbnail size | 200 × 200 px (Imagick driver) |
+| Password minimum length | 10 characters |
+| Password special character | Required (at least one of `!@#$%^&*`) |
+| Profile picture upload limit | 5 MB |
+| Blog document upload limit | 10 MB |
+| JWT access token lifetime | 60 minutes |
+| Session / Redis key TTL | 120 minutes |
+
+---
+
+## 11. Conclusion
 
 PlusPoint EDU is a well-structured Laravel application designed for educational institution management and student profile administration. The architecture follows Laravel best practices with clear separation of concerns through the MVC pattern.
 

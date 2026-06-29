@@ -38,7 +38,7 @@ class AccountController extends Controller
                 'email' => 'required|email|regex:/^[^A-Z]/|unique:users,email',
                 'password' => [
                     'required',
-                    'min:8',
+                    'min:12',
                     'regex:/[a-z]/',      // must contain at least one lowercase letter
                     'regex:/[A-Z]/',      // must contain at least one uppercase letter
                     'regex:/[0-9]/',      // must contain at least one digit
@@ -61,7 +61,7 @@ class AccountController extends Controller
                 ]
             ],
             [
-                'password.min' => 'The password must be at least 8 characters.',
+                'password.min' => 'The password must be at least 12 characters.',
                 'password.regex' => 'The password must contain at least one lowercase letter, one uppercase letter, and one digit.',
                 'confirm_password.same' => 'The confirm password must match the password.',
                 'email.regex' => 'The email must not contain uppercase letters.',
@@ -398,7 +398,7 @@ class AccountController extends Controller
     {
         // dd($request->all());
         $validator = Validator::make($request->all(), [
-            'image' => $request->has('nullCheckbox') ? 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048' : 'required|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
+            'image' => $request->has('nullCheckbox') ? 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:5120' : 'required|image|mimes:jpeg,png,jpg,gif,svg|max:5120',
         ]);
 
         if ($validator->passes()) {
@@ -420,8 +420,7 @@ class AccountController extends Controller
                 $manager = new ImageManager(Driver::class);
                 $image = $manager->read($source_path);
 
-                // crop the best fitting 5:3 (600x360) ratio and resize to 600x360 pixel
-                $image->cover(150, 150);
+                $image->cover(300, 300);
                 $image->save(public_path("/profile_pic/thumb/{$imageName}"));
                 File::delete(public_path("/profile_pic/thumb/" . Auth::user()->image));
                 File::delete(public_path("/profile_pic/" . Auth::user()->image));

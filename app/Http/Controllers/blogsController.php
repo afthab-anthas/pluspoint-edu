@@ -26,7 +26,7 @@ class blogsController extends Controller
             $blogsQuery->where('category_id', $selectedCategory);
         }
 
-        $blogs = $blogsQuery->paginate(9);
+        $blogs = $blogsQuery->paginate(15);
 
 
         return view('front.blog-posts.blogs', [
@@ -85,14 +85,14 @@ class blogsController extends Controller
     {
 
         $validator = Validator::make($request->all(), [
-            'document' => 'required|mimes:docx,pdf|max:2048',
+            'document' => 'required|mimes:docx,pdf|max:10240',
             'title' => 'required',
             'category_id' => 'required',
         ]);
         if ($validator->fails()) {
             session()->flash('info', 'No uploads were made, please check the form!');
             $request->validate([
-                'document' => 'required|mimes:docx,pdf|max:2048',
+                'document' => 'required|mimes:docx,pdf|max:10240',
                 'title' => 'required',
                 'category_id' => 'required',
             ]);

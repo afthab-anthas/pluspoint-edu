@@ -1528,7 +1528,7 @@ Route::post('/authenticate', [AccountController::class, 'authenticate'])
 | Component | Technology | Version |
 |-----------|-----------|---------|
 | Template Engine | Blade | Built-in |
-| CSS Framework | Bootstrap | 5.2.3 |
+| CSS Framework | Tailwind CSS | 3.4.0 |
 | Build Tool | Vite | Latest |
 | JavaScript | Vanilla JS | ES6+ |
 | CSS Preprocessor | SASS | 1.56.1 |

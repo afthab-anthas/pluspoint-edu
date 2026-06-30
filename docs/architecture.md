@@ -82,8 +82,6 @@ All pages use the Next.js App Router. The root layout (`src/app/layout.tsx`) app
 | `/admin/tokens` | `src/app/admin/tokens/page.tsx` | View, revoke, and restore agent tokens |
 | `/privacy` | `src/app/privacy/page.tsx` | Privacy policy (static) |
 | `/terms` | `src/app/terms/page.tsx` | Terms of service (static) |
-| `/debt-analyzer` | `src/app/debt-analyzer/page.tsx` | Debt scan list: all projects + latest scan status; MANAGER+LINE_MANAGER only; MEMBER → redirect `/dashboard` |
-| `/debt-analyzer/[id]` | `src/app/debt-analyzer/[id]/page.tsx` | Per-project debt scan detail: trigger, progress, results; MEMBER → redirect |
 
 ### Shell Components
 
@@ -130,7 +128,7 @@ The `AppShell` server component (`src/components/AppShell.tsx`) fetches the orga
 - **No OAuth providers** — login is handled entirely by `POST /api/auth/login` (custom credential route)
 - **JWT session strategy** — session data lives in a signed JWT cookie
 - **Custom sign-in page** — `/login`
-- **Session payload** — `userId`, `activeOrganisationId`, `sessionVersion`. Role-less since PM3: `role`/`teamId`/`isLineManager` are resolved per-request from the `Membership` row by `withAuthScoped`, never stored in the JWT.
+- **Session payload** — `userId`, `role` (`MANAGER` | `LINE_MANAGER` | `MEMBER`), `teamId`, `isLineManager`, `organisationId`, `sessionVersion`
 
 `src/lib/withAuthScoped.ts` is the central auth + scope resolver for all session-protected API routes and server components. It:
 1. Calls `auth()` to retrieve the session
@@ -159,7 +157,7 @@ Three roles enforced at the API layer in every route handler:
 | Role | Team | Visibility | Write capabilities |
 |---|---|---|---|
 | `MANAGER` | None (org-level, `teamId IS NULL`) | All teams, all projects, all members' time | Full: team CRUD, role changes, global rules, all tokens, exec summaries, audit log, budget |
-| `LINE_MANAGER` | One team | Own team's projects, own team members' time | Per-team: create/edit projects on own team, assign members, rotate that team's project tokens, exec summaries for own team's projects, team-scoped rules |
+| `LINE_MANAGER` | One team | Own team's projects, own team members' time | Per-team: assign members, rotate that team's project tokens, exec summaries for own team's projects, team-scoped rules |
 | `MEMBER` | One team | Own team's projects + teammates' activity | Post own manual statuses, view own time data only |
 
 ### Password Security
@@ -187,27 +185,28 @@ Top-level tenant entity. All other models carry `organisationId`. Currently one 
 |---|---|---|
 | `id` | `String @id @default(cuid())` | |
 | `name` | `String` | Indexed |
-| `anthropicApiKeyEnc` | `String?` | AES-256-GCM encrypted Anthropic API key; IV+authTag+ciphertext as base64. Set by MANAGER via `POST /api/admin/org/anthropic-key`. |
-| `anthropicKeyHint` | `String?` | Obscured hint (e.g. `sk-ant-api0...abcd`) shown to MANAGER on install page; never the raw key. |
 | Relations | — | users, teams, projects, prompts, activityEvents, intelligence, intelligenceHighlights, auditEntries, memberDailyTime, productiveRules, executiveSummaries, invitations, githubInstallations, userTokens, readinessSnapshots, codeHealthSnapshots |
 
 #### `User`
-Identity and authentication record only. Organisation membership, role, and team assignment live exclusively in `Membership` (dropped from `User` in PM6 migration `20260622000001_drop_user_legacy_cols`).
-
 | Column | Type | Notes |
 |---|---|---|
 | `id` | `String @id` | |
 | `email` | `String @unique` | |
 | `name`, `bio`, `jobTitle`, `location` | `String` / `String?` | |
 | `passwordHash` | `String` | bcrypt, never exposed |
-| `isActive` | `Boolean` | login lockout; checked by `POST /api/auth/login` |
+| `role` | `Role` | MANAGER / LINE_MANAGER / MEMBER |
+| `teamId` | `String?` | null for MANAGER |
+| `isLineManager` | `Boolean` | sentinel, true when role = LINE_MANAGER |
+| `isActive` | `Boolean` | |
 | `failedLogins` | `Int` | account lockout counter |
 | `lockedUntil` | `DateTime?` | |
 | `sessionVersion` | `Int @default(0)` | incremented on role/team changes; JWT drift detection |
 | `tenantKey` | `String?` | reserved for multi-tenant |
+| `organisationId` | `String` | FK → Organisation |
+| Indexes | — | `[teamId]`, `[role]`, `[organisationId]` |
 
-#### `Membership` — sole source of truth for role/team/org
-**The tenancy boundary and RBAC authority.** One row per `(user, organisation)` pair. `withAuthScoped` performs a single composite-indexed `findUnique` on `(userId, organisationId)` for every authenticated request; the row IS the proof that the user belongs to the active org and is the authoritative source of `role`, `teamId`, and `isLineManager`. The JWT carries `activeOrganisationId` only as a hint — a tampered claim resolves to no row → 401. The legacy `User.organisationId/role/teamId/isLineManager` columns were dropped in PM6 (migration `20260622000001_drop_user_legacy_cols`); they no longer exist on the `User` table.
+#### `Membership` — tenancy proof (PM3)
+**The tenancy boundary.** One row per `(user, organisation)` pair. Post-PM3, `withAuthScoped` performs a single composite-indexed `findUnique` on `(userId, organisationId)` for every authenticated request; the row IS the proof that the user belongs to the active org. The JWT carries `activeOrganisationId` only as a hint — a tampered claim resolves to no row → 401. The legacy `User.organisationId/role/teamId/isLineManager` columns remain on disk and are still written on signup, but **no read path consults them after PM3**. They exist solely as a PM6 rollback fallback and will be dropped in PM6.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -399,47 +398,6 @@ One context drift assessment per trigger event per project. Stores the result of
 | `updatedAt` | `DateTime @updatedAt` | |
 | Indexes | — | `[projectId, assessedAt]`, `[organisationId]` |
 
-#### `TechnicalDebtScan`
-One technical debt scan invocation per project. Stores state machine progress and SonarQube results (Phase B) plus AI synthesis findings (Phase D). Added in migration `20260626072627_add_technical_debt_scan`.
-
-##### Phase D — AI Synthesis Pipeline
-
-Phase D adds AI synthesis as the final SYNTHESISING step, executed inside `src/lib/debt/orchestrate.ts` after the SONAR step writes raw metrics:
-
-- **`synthesise.ts`** — `synthesiseDebtFindings({ organisationId, sonarIssues, securityFindings, detectedFrameworks })` calls the AI provider via Vercel AI SDK `generateText` (using `getAutoCallModel()`). Ceiling-gated via `isCeilingExceeded` before every call. Empty evidence fast-path: when both `sonarIssues` and `securityFindings` are empty, the AI is never called and `{ findings: [], score: 100 }` is returned immediately.
-- **`compute-score.ts`** — `computeDebtScore(findings): number` deterministically computes the 0–100 `debtScore` from P1–P4 finding counts: `100 − (P1×20 + P2×10 + P3×4 + P4×1)`, floored at 0. The score is never AI-emitted — prevents model inflation or deflation.
-- **`SonarEngineResult` now returns `issues: SonarIssue[]`** — the already-fetched Sonar issues array is passed through to the orchestrator at no additional API cost (no duplicate call).
-- **Two anti-hallucination guards** applied before storage: (1) *realFiles Set* — every finding's `evidence.files` must contain at least one file from actual Sonar issues or SecurityFindings; (2) *priority guard* — `priority` must be exactly one of `P1`/`P2`/`P3`/`P4`; any other string is dropped.
-- **Synthesis failure → ERROR**: if `isCeilingExceeded` is true or AI JSON parse fails, the scan is marked ERROR. Raw Sonar data written at the SYNTHESISING step is preserved either way.
-- **No GRAPH source in Phase D**: only `SONAR` and `SECURITY_SCAN` evidence sources are used; Graphify integration is deferred.
-- **DB fields populated on COMPLETE**: `findings (Json)` — array of `TechDebtFinding` objects; `findingsCount` — count of P1–P4 AI findings (distinct from `issueCount` = total Sonar issues); `debtScore` — 0–100 deterministic score; `aiTokensUsed`; `costUSD`.
-- **`DebtScanClient.tsx`** renders `debtScore` as a colour-coded `MetricCell` (≥80 green / 50–79 amber / <50 red) and a `FindingCard` list per finding with priority pill, category, title, description, evidence, and recommendation. Clean repos with no findings show an honest empty state.
-
-| Column | Type | Notes |
-|---|---|---|
-| `id` | `String @id @default(cuid())` | |
-| `projectId` | `String` | FK → Project (onDelete: Cascade) |
-| `organisationId` | `String` | FK → Organisation |
-| `status` | `TechDebtScanStatus @default(PENDING)` | PENDING / RUNNING / COMPLETE / ERROR |
-| `currentStep` | `TechDebtStep?` | DOWNLOADING / EXTRACTING / SONAR / SYNTHESISING / DONE; null when PENDING/ERROR |
-| `sonarProjectKey` | `String?` | SonarQube project key used (Phase B) |
-| `qualityGate` | `String?` | "PASS" / "FAIL" / "N/A" (Phase B) |
-| `reliabilityRating` | `String?` | "A"–"E" / "N/A" (Phase B) |
-| `securityRating` | `String?` | "A"–"E" / "N/A" (Phase B) |
-| `maintainabilityRating` | `String?` | "A"–"E" / "N/A" (Phase B) |
-| `techDebtMinutes` | `Int?` | SonarQube SQALE debt in minutes (Phase B) |
-| `issueCount` | `Int?` | Total SonarQube issues BLOCKER+CRITICAL+MAJOR (Phase B) |
-| `findings` | `Json?` | AI synthesis findings array (Phase D) |
-| `findingsCount` | `Int?` | Total findings count |
-| `criticalCount` | `Int?` | SonarQube BLOCKER severity issue count (Phase B) |
-| `highCount` | `Int?` | SonarQube CRITICAL severity issue count (Phase B) |
-| `debtScore` | `Int?` | 0–100 composite debt score (Phase D) |
-| `aiTokensUsed` | `Int?` | Tokens used for AI synthesis (Phase D) |
-| `costUSD` | `Float?` | AI synthesis cost (Phase D) |
-| `error` | `String?` | Error message if status = ERROR |
-| `scannedAt` | `DateTime @default(now())` | |
-| Indexes | — | `[projectId, createdAt]`, `[organisationId]` |
-
 #### `CodeHealthSnapshot`
 One SonarQube scan result per project per invocation. Stores the ratings returned by the SonarQube REST API after a sonar-scanner run. Added in migration `20260614000004_add_code_health_snapshot`; `scanSource` added in `20260615000001_add_code_health_scan_source`.
 
@@ -599,7 +557,6 @@ All routes under `src/app/api/`. Session-authenticated routes use `withAuthScope
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `GET` | `/api/projects` | Session | List projects scoped to org/team |
-| `POST` | `/api/projects` | Session (MANAGER or LINE_MANAGER of own team) | Create project; LINE_MANAGER scoped to `ctx.teamId` (Membership-verified, not JWT); returns 201 with one-time `agentToken`; audited |
 | `GET` | `/api/projects/[id]` | Session | Get project (strips `agentTokenHash`) |
 | `PATCH` | `/api/projects/[id]` | Session (MANAGER or LINE_MANAGER of team) | Edit project; can trigger `linkRepoAndRefresh` |
 | `DELETE` | `/api/projects/[id]` | Session (MANAGER) | Delete project |
@@ -621,9 +578,6 @@ All routes under `src/app/api/`. Session-authenticated routes use `withAuthScope
 | `GET` | `/api/projects/[id]/drift` | Session (all roles, own team) | Lists last 10 drift assessments for the project scoped to organisationId |
 | `POST` | `/api/projects/[id]/drift/baseline` | Session (MANAGER or LINE_MANAGER) | Resolves context source, stores `contextBranchBaselineSha` on the Project, writes CONTEXT_BASELINE_SET audit |
 | `GET` | `/api/projects/[id]/drift/[assessmentId]` | Session (all roles, own team) | Triple-scoped fetch (assessmentId + projectId + organisationId); calls `resetStaleRunningAssessments()` before read |
-| `POST` | `/api/projects/[id]/debt-scan` | Session (MANAGER or in-team LINE_MANAGER) | Trigger a technical debt scan; duplicate guard returns 409; rate-limited 1/30min/project; returns `{ scanId, status: "PENDING" }` 202 |
-| `GET` | `/api/projects/[id]/debt-scan` | Session (MANAGER or in-team LINE_MANAGER) | List latest 10 `TechnicalDebtScan` records for the project |
-| `GET` | `/api/projects/[id]/debt-scan/[scanId]` | Session (MANAGER or in-team LINE_MANAGER) | Poll a single scan; calls `resetStaleRunningDebtScans()` before read |
 
 ### Agent Tokens
 
@@ -791,7 +745,6 @@ All limiters use `@upstash/ratelimit` (sliding window) when `UPSTASH_REDIS_REST_
 | `src/lib/ratelimit-code-health.ts` | `POST /api/projects/[id]/code-health/scan` | 1/120s | 120 s | per projectId |
 | `src/lib/ratelimit-security-scan.ts` | `POST /api/projects/[id]/security-scan` | 1/120s | 120 s | per projectId |
 | `src/lib/ratelimit-member-card.ts` | `GET /api/admin/members/[id]/card` | 30/min | 60 s | per caller userId |
-| `src/lib/ratelimit-debt-scan.ts` | `POST /api/projects/[id]/debt-scan` | 1/30min | 30 min | per projectId |
 
 **`SCALE_TIER`** env var (values: `0.5x`, `1x`, `4x`) multiplies limits for `ingest/event`, `summary`, `export`, and `repo-context/refresh`. Default is `1x`.
 
@@ -936,133 +889,3 @@ The system runs as a **single-organisation deployment** in v1. Multi-tenancy is 
 - The `GithubInstallation` unique constraint `[organisationId, installationId]` prevents cross-org installation sharing
 
 To activate true multi-tenancy, a future phase would promote `tenantKey` from a reserved nullable column to an enforced discriminator and add a tenant resolution layer at the middleware boundary.
-
----
-
-## Onboarding Tour Engine
-
-A first-time onboarding tour for new users. The engine mounts inside `AppShellClient` and activates when `User.hasOnboarded = false`. When `hasOnboarded = true` it is a zero-cost passthrough — no renders, no listeners, no polling. On tour completion or skip, it calls `PATCH /api/me/onboarding` to set `hasOnboarded = true` permanently.
-
-### Persistence
-Step position is stored in the `pulse-tour-step` first-party cookie (24-hour expiry, SameSite=Lax, non-httpOnly, JS-readable). The cookie survives hard reloads and cross-route navigations without a DB write per step.
-
-### State Machine (`src/lib/tour/reducer.ts`)
-```
-inactive  ──[INIT, on route]──────► polling
-inactive  ──[INIT, off route]─────► waiting
-polling   ──[TARGET_FOUND]────────► active
-polling   ──[TARGET_MISSING]──────► missing  (3 s timeout)
-waiting   ──[ARRIVED_ON_ROUTE]────► polling
-active    ──[ADVANCE, on route]───► polling
-active    ──[ADVANCE, off route]──► waiting
-active/missing ──[EXIT]───────────► inactive
-```
-
-### Advance Modes
-- `{ on: "click" }` — `addEventListener("click", handler, { once: true })` on the spotlight target
-- `{ on: "navigate"; to }` — `usePathname()` change watcher triggers advance when `to` matches. If `to` ends with `/` (e.g. `"/projects/"`), prefix matching is used so any `/projects/[id]` route triggers the advance.
-- `{ on: "next" }` — button in `TourTooltip` calls `onNext` directly. The button label is `step.buttonText ?? "Next →"` (e.g. "Start" on the welcome step, "Go to dashboard" on the done step).
-
-### Route Matching (`routePrefix`)
-Steps on dynamic routes (e.g. `/teams/[id]`, `/projects/[id]`) set `routePrefix: "/teams/"` or `"/projects/"`. `matchesRoute(step, path)` returns `true` if `path === step.route` OR `path.startsWith(step.routePrefix)`. This is used in `activateStep`, `advance`, and the route-change effect. Steps without `routePrefix` still use exact matching.
-
-### Per-step Poll Timeout (`pollTimeout`)
-Steps whose target appears only after a user action (e.g. submitting a create-project form to reveal the token) set `step.pollTimeout` in milliseconds. The default is 3 000 ms. `project-token-copy` sets 120 000 ms so the user has 2 minutes to fill the form before the engine falls back to `missing` state.
-
-### Role Filtering and Render Context
-`filterSteps(steps, role)` applied at provider mount. Steps with a `roles` array are shown only to matching roles; steps without `roles` show to all. `TourProvider` accepts a `renderCtx: TourRenderContext` prop (`{ role, hasTeam, hasProject, firstProjectId? }`) from `AppShell`, which is forwarded through `AppShellClient`. Stub conditions evaluate `renderCtx` to swap copy when a condition is true (e.g. LINE_MANAGER with no project sees "once a project exists…" copy on project-detail steps). `firstProjectId` is used by `navigateTo` functions on feature-only steps (e.g. `project-ai-narration`) to auto-navigate to the first available project. `TourStep` supports an optional `navigateTo?: string | ((ctx: TourRenderContext) => string)` field; when present, `TourProvider` calls `router.push(navigateTo)` when activating the step.
-
-### Completion vs. Skip
-`advance()` past the last step calls `doExit().then(() => router.push("/dashboard"))`. `skip()` calls `doExit()` only — no redirect. This keeps the "Go to dashboard" final step meaningful.
-
-### Retake Tour (`/profile`)
-`RetakeTourButton` on the profile page calls `PATCH /api/me/onboarding { hasOnboarded: false }`, clears the `pulse-tour-step` cookie via `clearTourCookie()`, then `router.push("/dashboard")` to re-trigger the engine.
-
-### Never-Trap Guarantee
-The overlay is 4 separate `position: fixed` divs surrounding (but not covering) the spotlight target. The spotlight ring div has `pointer-events: none` so clicks pass through to the real element. In `missing` state (target not found within poll timeout), the overlay is skipped entirely — only the tooltip and Skip button render. Esc key always calls `skip()`.
-
-### Dual-Tour Architecture (Phase 5)
-
-Phase 5 introduces two distinct tour modes, selected by the `pulse-tour-kind` cookie:
-
-- **first-run tour** (`pulse-tour-kind` absent or `"first-run"`): activates when `User.hasOnboarded = false`. Includes creation steps (creating a team, creating a project, copying the project token). Intended for new users who have no data yet.
-- **feature tour** (`pulse-tour-kind = "feature"`): activates when the user clicks "Take the tour again" on `/profile`. `RetakeTourButton` writes the `pulse-tour-kind=feature` cookie before pushing to `/dashboard`. Skips all creation steps; educational only. Allows existing users to revisit the tour without being required to create another team or project.
-
-`filterSteps(steps, role, tourMode, ctx)` applies three filters: role membership, `availableIn` field (`"first-run"` | `"feature"` | absent = both), and `skipIf(ctx)` predicate (evaluated at mount time, not per step).
-
-### Advance Modes
-- `{ on: "click" }` — `addEventListener("click", handler, { once: true })` on the spotlight target
-- `{ on: "navigate"; to }` — `usePathname()` change watcher triggers advance when `to` matches. If `to` ends with `/` (e.g. `"/projects/"`), prefix matching is used so any `/projects/[id]` route triggers the advance.
-- `{ on: "next" }` — button in `TourTooltip` calls `onNext` directly. The button label is `step.buttonText ?? "Next →"` (e.g. "Start" on the welcome step, "Go to dashboard" on the done step).
-- `{ on: "element-appears"; target }` — `TourProvider` polls the DOM at 200 ms intervals and advances automatically when `document.querySelector(target)` becomes non-null. Used by `project-create-modal` to advance only after the project-creation form is actually submitted and the token copy element appears. The polling is started in `activateStep` (early-exit path) and driven by a `useEffect` that starts/stops the interval based on engine state.
-
-### Cookies
-
-| Cookie | Purpose | Notes |
-|---|---|---|
-| `pulse-tour-step` | Current step ID (resume on reload) | 24-hour expiry, SameSite=Lax, non-httpOnly |
-| `pulse-tour-kind` | Tour mode: `"first-run"` (default) or `"feature"` | Written by `RetakeTourButton`; cleared by `TourProvider` on exit |
-
-### Step Inventory (Phase 6 — 25 steps)
-
-**First-run only (9 steps):**
-| id | roles | advance | notes |
-|---|---|---|---|
-| `welcome` | M+LM | next ("Start") | Centered, no spotlight; sentinel selector |
-| `dashboard-cta` | MANAGER | click | Links to team creation |
-| `teams-new-team` | MANAGER | click | Opens new-team modal |
-| `teams-modal` | MANAGER | navigate `/teams/` | Spotlights entire dialog card; advance on navigate to `/teams/[id]`; replaced `teams-create-btn` |
-| `project-new-project` | M+LM | click | routePrefix `/teams/`; live-DOM poll crosses page navigation |
-| `project-create-modal` | M+LM | element-appears `[data-tour='project-token-copy']` | Spotlights entire form card; advances only after project is created and token element appears |
-| `project-token-copy` | M+LM | click | pollTimeout 120 000 ms |
-| `project-token-saved` | M+LM | click | Both token elements appear simultaneously |
-| `project-open` | M+LM | navigate `/projects/` | routePrefix `/teams/`; drives user to project detail; stubbed for LM !hasProject |
-
-**Feature only (7 steps):**
-| id | roles | advance | notes |
-|---|---|---|---|
-| `feature-welcome` | M+LM | next | Centered; replaces `welcome` in feature mode |
-| `project-ai-narration` | M+LM | next | `skipIf: !hasProject`; auto-navigates to first project via `navigateTo`; spotlights `AISummaryPanel` |
-| `nav-prompts-feature` | M+LM | next | Auto-navigates to `/prompts` via `navigateTo` |
-| `context-analyser-main` | M+LM | next | Auto-navigates to `/context-analyser` via `navigateTo` |
-| `nav-cost-dashboard-feature` | M+LM | next | Auto-navigates to `/admin/cost-dashboard` via `navigateTo` |
-| `nav-install-feature` | M+LM | click | Auto-navigates to `/install` via `navigateTo`; buttonText "Finish tour" |
-| `done` | M+LM | next ("Go to dashboard") | Centered, no spotlight; fires router.push("/dashboard") |
-
-**First-run only — navigation steps (3 steps, moved from shared in Phase 6):**
-| id | roles | advance | notes |
-|---|---|---|---|
-| `nav-prompts` | M+LM | next | Sidebar; routePrefix `/`; `availableIn: "first-run"` |
-| `nav-cost-dashboard` | M+LM | next | Sidebar; `availableIn: "first-run"` |
-| `nav-install` | M+LM | click | Sidebar → /install; `availableIn: "first-run"` |
-
-**Shared — both tour modes (6 steps):**
-| id | roles | advance | notes |
-|---|---|---|---|
-| `project-verdict` | M+LM | next | routePrefix `/projects/`; stubbed for LM !hasProject |
-| `project-exceptions` | M+LM | next | stubbed for LM !hasProject |
-| `project-spend-ring` | M+LM | next | stubbed for LM !hasProject |
-| `project-code-health` | M+LM | next | routePrefix `/projects/`; `data-tour="project-code-health"` on `CodeHealthRing` |
-| `project-feature-progress` | M+LM | next | routePrefix `/projects/`; `data-tour="project-feature-progress"` on `FeatureAreaTrack` |
-| `project-repo-context` | M+LM | next | routePrefix `/projects/`; `data-tour="project-repo-context"` on `RepoContextPanel` |
-
-### Step Counts by Role and Mode
-| Tour mode | Role | Data state | Steps shown |
-|---|---|---|---|
-| first-run | MANAGER | no data | 19 |
-| first-run | LINE_MANAGER | no project | 16 |
-| feature | MANAGER | with data | 13 |
-| feature | MANAGER | no data | 20 |
-| feature | LINE_MANAGER | with data | 13 |
-| feature | LINE_MANAGER | no data | 17 |
-| either | MEMBER | — | 0 |
-
-### New `data-tour` Attributes (Phase 5)
-| Value | Component | Notes |
-|---|---|---|
-| `teams-modal` | `NewTeamDialog.tsx` | Inner card; replaced `teams-create-btn` target |
-| `project-create-modal` | `NewProjectDialog.tsx` | Form card |
-| `project-code-health` | `CodeHealthRing.tsx` | On both section paths |
-| `project-feature-progress` | `FeatureAreaTrack.tsx` | On both div paths |
-| `project-repo-context` | `RepoContextPanel.tsx` | On all 4 return-path divs |
-| `nav-teams` | `AppShellClient.tsx` | Wrapper div around Teams NavLink |

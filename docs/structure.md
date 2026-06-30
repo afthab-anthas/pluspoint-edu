@@ -81,7 +81,7 @@
 | `app/projects/[id]/_components/ExceptionsPanel.tsx` | Client component. Renders operational `ExceptionFlag[]` (flat chips) and grouped security findings (`SecurityFindingGroup[]`). HIGH/CRITICAL security groups expanded by default; MEDIUM/LOW behind "+N more findings — view all" toggle. Each `GroupRow` expands to show rawMessage + repo-relative file:line list. `scanState` prop controls honest empty states ("No security scan has been run yet." / "Nothing needs attention right now."). |
 | `app/projects/[id]/_components/ExceptionsWhoRow.tsx` | Shows which members are active/idle; passes `flags`, `securityGroups`, and `scanState` through to `ExceptionsPanel`. |
 | `app/projects/[id]/_components/MomentumStrip.tsx` | Momentum / velocity indicator strip |
-| `app/projects/[id]/_components/RepoContextPanel.tsx` | Shows linked GitHub repo snapshot and status. Phase 5: `data-tour="project-repo-context"` on all 4 return-path `<div>`s. |
+| `app/projects/[id]/_components/RepoContextPanel.tsx` | Shows linked GitHub repo snapshot and status |
 | `app/projects/[id]/_components/RecentCommitsAccordion.tsx` | Expandable list of recent commits from git activity |
 | `app/projects/[id]/_components/StatusBox.tsx` | Manual status entry box for members |
 | `app/projects/[id]/_components/MemberStateCard.tsx` | Per-member current-state card |
@@ -94,11 +94,11 @@
 | `app/projects/[id]/_components/SpendRing.tsx` | Windowed dev spend amount card (obeys global time filter, no ceiling ring); MANAGER/LINE_MANAGER only |
 | `app/projects/[id]/_components/SessionTimeChip.tsx` | Legacy chip — session time is now rendered as Col 4 of `CompletionStatusWidget`; file retained for reference |
 | `app/projects/[id]/_components/TimeFilterBar.tsx` | Client pill component for Today/7d/30d global time filter |
-| `app/projects/[id]/_components/FeatureAreaTrack.tsx` | Feature/area · Phase · Latest worker table (Server Component); phase is categorical badge only. Phase 5: `data-tour="project-feature-progress"` on both `<div>` paths. |
+| `app/projects/[id]/_components/FeatureAreaTrack.tsx` | Feature/area · Phase · Latest worker table (Server Component); phase is categorical badge only |
 | `app/projects/[id]/_components/RecentActivityAccordion.tsx` | Collapsible list of Claude-hook activity events with real text (feedSummary or manualText); mirrors RecentCommitsAccordion |
 | `PromptAdoptionStrip` | `src/app/projects/[id]/_components/PromptAdoptionStrip.tsx` | Chip row: windowed library-prompt match count + "In context: P[N] · [Title]" recency chip; empty state "No library prompts matched today." |
 | `CompletionStatusWidget` | `src/app/projects/[id]/_components/CompletionStatusWidget.tsx` | Client component; 4-cell "Completion Status" panel (A4 plain-English unfinished markers · A3 test-file count · A2 OLS burn-down forecast · Col4 Claude Code session time). "Run Scan" button visible to MANAGER/LINE_MANAGER only. No completion %, no single rolled-up score. |
-| `CodeHealthRing` | `src/app/projects/[id]/_components/CodeHealthRing.tsx` | Client component; SVG ring showing worst-of reliability/security/maintainability grade; quality gate badge; coverage/duplication pcts; "Run Scan" button (MANAGER/LINE_MANAGER). "Not scanned yet — run a scan" empty state. Phase 5: `data-tour="project-code-health"` on both `<section>` paths. |
+| `CodeHealthRing` | `src/app/projects/[id]/_components/CodeHealthRing.tsx` | Client component; SVG ring showing worst-of reliability/security/maintainability grade; quality gate badge; coverage/duplication pcts; "Run Scan" button (MANAGER/LINE_MANAGER). "Not scanned yet — run a scan" empty state. |
 
 #### Teams
 
@@ -106,10 +106,10 @@
 |---|---|
 | `app/teams/page.tsx` | Server component; shows all teams (MANAGER: all, others: own team only); renders `TeamsTable` and `NewTeamDialog` |
 | `app/teams/_components/TeamsTable.tsx` | Table of teams with member/project counts |
-| `app/teams/_components/NewTeamDialog.tsx` | Dialog for creating a new team (MANAGER only). Phase 5: `data-tour="teams-modal"` on inner card; removed `data-tour="teams-create-btn"`. |
+| `app/teams/_components/NewTeamDialog.tsx` | Dialog for creating a new team (MANAGER only) |
 | `app/teams/[id]/page.tsx` | Team detail; fetches team, members, recent activity, GitHub installations; enforces team-scoped access |
 | `app/teams/[id]/_components/TeamDetailClient.tsx` | Client component for team detail interactivity |
-| `app/teams/[id]/_components/NewProjectDialog.tsx` | Dialog for creating a new project within the team. Phase 5: `data-tour="project-create-modal"` on form card. |
+| `app/teams/[id]/_components/NewProjectDialog.tsx` | Dialog for creating a new project within the team |
 | `app/teams/[id]/_components/TimeTrackingToggle.tsx` | Toggle for enabling/disabling time tracking on a team |
 
 #### Admin
@@ -137,23 +137,18 @@
 
 | Path | Description |
 |---|---|
-| `app/install/page.tsx` | Installation guide; fetches existing `UserToken`; renders `InstallClient`, `MachineSetupSection`, and (MANAGER-only) `AnthropicKeySection` |
+| `app/install/page.tsx` | Installation guide; fetches existing `UserToken`; renders `InstallClient` and `MachineSetupSection` |
 | `app/install/_components/InstallClient.tsx` | Client component displaying install instructions and token generation |
 | `app/install/_components/MachineSetupSection.tsx` | Machine-level setup instructions (`.pulse` config) |
 | `app/install/_components/CopyableCode.tsx` | Copyable code snippet component |
-| `app/install/_components/AnthropicKeySection.tsx` | MANAGER-only client component; shows key status chip (hint when set, "not configured" badge otherwise); password input with `sk-ant-` format validation; save/update button with verifying spinner; calls `POST /api/admin/org/anthropic-key` |
 | `app/install/install.module.css` | CSS module for install page header |
 | `app/prompts/page.tsx` | Prompt library viewer; fetches all `Prompt` records for the org sorted by `pNumber`; MEMBER can view, MANAGER/LINE_MANAGER can edit |
 | `app/prompts/_components/PromptsClient.tsx` | Client component for prompt CRUD |
 | `app/profile/page.tsx` | User profile page; shows time stats, role badge, `ChangePasswordForm`, `PersonalInfoForm` |
 | `app/profile/_components/ChangePasswordForm.tsx` | Change password form |
 | `app/profile/_components/PersonalInfoForm.tsx` | Edit name/bio/job title/location |
-| `app/profile/_components/RetakeTourButton.tsx` | "Take the tour again →" button; PATCHes `hasOnboarded: false`, clears tour cookie, redirects to `/dashboard` |
 | `app/invite/[id]/page.tsx` | Invite acceptance page; looks up `Invitation` by ID; passes to `InviteAcceptClient` |
 | `app/invite/[id]/_components/InviteAcceptClient.tsx` | Client component handling invite accept/reject flow |
-| `app/debt-analyzer/page.tsx` | Server component; MANAGER+LINE_MANAGER only (MEMBER → /dashboard); lists all projects with latest `TechnicalDebtScan` status |
-| `app/debt-analyzer/[id]/page.tsx` | Per-project debt scan page; fetches latest scan; passes to `DebtScanClient` |
-| `app/debt-analyzer/[id]/_components/DebtScanClient.tsx` | Client component; trigger button, 5s poll loop, 15min timeout, state UI (no-scan/PENDING/RUNNING/COMPLETE/ERROR) |
 
 #### API routes
 
@@ -196,8 +191,6 @@
 | `api/projects/[id]/drift/route.ts` | POST/GET | POST triggers a new `ContextDriftAssessment`; rate-limited 3/hr/project; writes CONTEXT_ASSESS audit; returns `{ assessmentId, status: "PENDING" }` 202. GET lists last 10 assessments for the project scoped to organisationId |
 | `api/projects/[id]/drift/baseline/route.ts` | POST | Resolves context source, stores `contextBranchBaselineSha` on the Project, writes CONTEXT_BASELINE_SET audit; MANAGER/LINE_MANAGER only |
 | `api/projects/[id]/drift/[assessmentId]/route.ts` | GET | Triple-scoped fetch (assessmentId + projectId + organisationId); calls `resetStaleRunningAssessments()` before read |
-| `api/projects/[id]/debt-scan/route.ts` | POST trigger debt scan (MANAGER/in-team LINE_MANAGER, rate-limited 1/30min); GET list latest 10 scans |
-| `api/projects/[id]/debt-scan/[scanId]/route.ts` | GET poll single scan; triple-scope guard (scanId + projectId + organisationId) |
 | `api/projects/[id]/members/route.ts` | GET/POST | Manage project membership |
 | `api/projects/[id]/members/[userId]/events/route.ts` | GET | Fetch events for a specific member on a project |
 
@@ -239,7 +232,6 @@
 | `api/admin/budget/route.ts` | GET | Budget summary |
 | `api/admin/budget/[id]/route.ts` | PATCH | Update per-project `devTokenBudget` |
 | `api/admin/cleanup/route.ts` | POST | Data lifecycle cleanup; Bearer-token auth via `INTERNAL_CLEANUP_TOKEN`; nulls content on `ActivityEvent` rows >90 days, deletes `AuditLogEntry` >12 months, deletes `MemberDailyTime` >13 months |
-| `api/admin/org/anthropic-key/route.ts` | POST | MANAGER-only; validates, test-calls, encrypts and stores org Anthropic API key; returns `{ hint }` |
 
 **GitHub**
 
@@ -323,9 +315,8 @@
 | [`userToken.ts`](src/lib/userToken.ts) | `resolveUserToken(rawToken)`: resolves per-user `UserToken` by preview → bcrypt verify; returns `userId`, `organisationId`, `teamId` |
 | [`password.ts`](src/lib/password.ts) | `validatePassword()` (min 12 chars, requires letter + digit + symbol), `hashPassword()` (bcrypt cost 12), `verifyPassword()` |
 | [`redact.ts`](src/lib/redact.ts) | `redact(input)` → `{ text, count, kinds }`; strips env-style secrets, JWTs, `sk-ant-` / `sk-` API keys, AWS key IDs, PEM private keys, URL credentials, bcrypt hashes; truncates to 1500 chars |
-| [`anthropic-key.ts`](src/lib/anthropic-key.ts) | `encryptApiKey(raw)` / `decryptApiKey(enc)`: AES-256-GCM symmetric crypto using `ANTHROPIC_KEY_ENCRYPTION_SECRET`. `obscureKey(raw)`: returns `sk-ant-api0...abcd` hint. `getOrgAnthropicKey(organisationId)`: DB fetch + decrypt, returns `string \| null` |
-| [`narrate.ts`](src/lib/narrate.ts) | `generateNarration(event, project, traceCtx, anthropicApiKey?)`: calls Anthropic Haiku (primary) or free models (fallback) via `getAutoCallModel`; uses 90s in-memory cooldown per project; delta-gates on `inputHash`; returns structured JSON (headline, narration, stage, riskLevel, riskFocus); records OTel spans; exports `resetCooldowns()` |
-| [`gemini.ts`](src/lib/gemini.ts) | `generateFeedSummary(excerpt, filesChanged, gitSummary, anthropicApiKey?)`: calls Anthropic Haiku (primary) or free models (fallback) for 5–8 word one-liner feed summaries; `validateFeedSummary(text)`: prompt-echo/length validator; `firstSentence(text)` helper |
+| [`narrate.ts`](src/lib/narrate.ts) | `generateNarration(event, project, recentEvents, repoSnapshot)`: calls Groq `llama-3.3-70b-versatile`; uses 90s in-memory cooldown per project; delta-gates on `inputHash`; returns structured JSON (headline, narration, stage, riskLevel, riskFocus); records OTel spans; exports `resetCooldowns()` |
+| [`gemini.ts`](src/lib/gemini.ts) | `generateFeedSummary(excerpt, filesChanged, gitSummary)`: calls Groq `llama-3.3-70b-versatile` for 5–8 word one-liner feed summaries; `firstSentence(text)` helper |
 | [`otel.ts`](src/lib/otel.ts) | Minimal OTel-compatible in-process span tracing; exports `startTrace()`, `startSpan()`, `endSpan()`, `commitTrace()`, `getLastTrace()`; stores last completed trace in memory |
 | [`metrics.ts`](src/lib/metrics.ts) | In-memory Prometheus-compatible metrics store; tracks request counts by status class, latency histograms per route; exports `recordRequest()`, `recordClaudeTokens()`, `generatePrometheusText()` |
 | [`logger.ts`](src/lib/logger.ts) | Pino logger singleton; redacts sensitive fields (`password`, `passwordHash`, `agentToken`, `sessionExcerpt`, `manualText`, `tenantKey`, `jwt`, `bearerToken`, authorization headers); log level from `LOG_LEVEL` env var |
@@ -362,11 +353,7 @@
 | [`ratelimit-code-health.ts`](src/lib/ratelimit-code-health.ts) | `checkCodeHealthScanRateLimit(projectId)` — Upstash sliding-window 1/120s per projectId; prefix `pulse:code-health:scan` |
 | [`ratelimit-security-scan.ts`](src/lib/ratelimit-security-scan.ts) | `checkSecurityScanRateLimit(projectId)` — Upstash sliding-window 1/120s per projectId; prefix `pulse:security:scan`. Fail-open on Upstash errors. |
 | [`ratelimit-drift.ts`](src/lib/ratelimit-drift.ts) | `checkDriftRateLimit(projectId)` — in-memory sliding-window 3/hr per projectId; Upstash-upgradeable; `_resetDriftRateLimitStore()` for tests |
-| [`ratelimit-debt-scan.ts`](src/lib/ratelimit-debt-scan.ts) | `checkDebtScanRateLimit(projectId)` — Upstash sliding-window 1/30min per projectId; prefix `pulse:debt-scan`; fail-open on Upstash errors |
-| [`ratelimit-admin-key.ts`](src/lib/ratelimit-admin-key.ts) | `checkAdminKeyRateLimit(userId)` — Upstash sliding-window 5/min per userId; prefix `pulse:admin:org-key`; fail-open on Upstash errors; bypasses in `NODE_ENV=test` |
 | [`drift/orchestrate.ts`](src/lib/drift/orchestrate.ts) | Drift orchestrator. `triggerAssessment(projectId, orgId, triggeredBy)` — creates PENDING record, runs pipeline async. `runAssessmentPipeline()` — full pipeline. `incrementVolumeCounter` / `resetVolumeCounter` — per-project ingest event counter (VOLUME_THRESHOLD=50 → auto-trigger). `resetStaleRunningAssessments()` — sets RUNNING→ERROR for assessments stuck >STALE_RUNNING_MS (5 min). `_resetDriftGuards()` for tests. DRIFT_COOLDOWN_MS=30 min in-process per projectId. |
-| [`debt/orchestrate.ts`](src/lib/debt/orchestrate.ts) | `triggerDebtScan(projectId, orgId)` — creates PENDING record + fires async pipeline; duplicate guard blocks if PENDING/RUNNING exists. `runDebtScanPipeline(scanId)` — real Phase B engine: project lookup → GitHub guard → cross-tenant installation guard → concurrency slot → DOWNLOADING → download+extract → SONAR → SonarQube scan → SYNTHESISING (stores sonar fields, findings/debtScore stay null until Phase D) → COMPLETE; finally: releaseScanSlot + deleteTmpdir. `resetStaleRunningDebtScans()` — sets RUNNING→ERROR for scans stuck >15 min. |
-| [`debt/engines.ts`](src/lib/debt/engines.ts) | `downloadAndExtract(project)` — creates tmp dir, downloads GitHub tarball via `downloadRepoTarball`, extracts; returns `{ tmpDir, srcDir }`. `runSonarEngine(srcDir, project)` — provisions SonarQube project (`debt-{orgId}-proj-{projId}` key), runs scanner, waits for CE, fetches metrics + issues, returns `SonarEngineResult` with ratings/techDebtMinutes/issueCount/criticalCount(BLOCKER)/highCount(CRITICAL). `deleteTmpdir(tmpDir)` — `rmSync` recursive+force. |
 | [`drift/assess-diff.ts`](src/lib/drift/assess-diff.ts) | `assessDiff(projectId, organisationId, triggeredBy)` — resolves context source, compares GitHub commits against baseline SHA, creates `ContextDriftAssessment` record. BASELINE_INVALID: writes ERROR record; never auto-resets baseline. |
 | [`drift/analyse-ai.ts`](src/lib/drift/analyse-ai.ts) | AI analysis via Groq (ai-provider.ts). `analyseAiDrift(projectId, orgId, assessmentId, diff)` — sends diff to LLM, returns structured `DriftFinding[]`. Type: `DriftFinding { type: ACCURACY\|COVERAGE, area, doc, description, severity: LOW\|MEDIUM\|HIGH, confidence }` |
 | [`drift/compute-risk.ts`](src/lib/drift/compute-risk.ts) | `computeRiskLevel(findings)` → `{ riskLevel: DriftRiskLevel, counts, total }`. RED: any HIGH or ≥4 MEDIUM. AMBER: 1–3 MEDIUM. GREEN: no HIGH or MEDIUM. |
@@ -388,11 +375,6 @@
 | [`repo-context/drift-github.ts`](src/lib/repo-context/drift-github.ts) | GitHub diff helpers for drift detection. `ContextSource = "context_builds" \| "docs_on_default" \| "none"`. `resolveContextSource(installationId, fullName, defaultBranch)` — checks if `context_builds` branch exists. `compareCommits(installationId, fullName, base, head)` — GitHub Compare API. `branchExists()`, `getRecursiveTree()`, `getLatestCommitSha()`. |
 | [`utils.ts`](src/lib/utils.ts) | `cn(...inputs)`: `clsx` + `tailwind-merge` className utility |
 | [`withAuthScoped.ts`](src/lib/withAuthScoped.ts) | (listed above) |
-| [`src/lib/tour/types.ts`](src/lib/tour/types.ts) | `TourRole`, `TourStep`, `TourAdvanceMode`, `EngineState`, `EngineAction` — all types for the onboarding tour engine |
-| [`src/lib/tour/cookie.ts`](src/lib/tour/cookie.ts) | `readTourCookie()`, `writeTourCookie(id)`, `clearTourCookie()` — step persistence for `pulse-tour-step` cookie. `readTourKindCookie()`, `writeTourKindCookie(kind)`, `clearTourKindCookie()` — tour-mode persistence for `pulse-tour-kind` cookie (`"first-run"` \| `"feature"`). |
-| [`src/lib/tour/filter.ts`](src/lib/tour/filter.ts) | `filterSteps(steps, role, tourMode, ctx)` — filters on role, `availableIn` (first-run / feature / both), and `skipIf(ctx)` predicate |
-| [`src/lib/tour/reducer.ts`](src/lib/tour/reducer.ts) | `tourReducer(state, action)` — pure state machine for tour engine transitions |
-| [`src/lib/tour/steps.ts`](src/lib/tour/steps.ts) | `TOUR_STEPS` — 21-step dual-tour inventory (Phase 5). 9 first-run-only steps (welcome → project-open creation flow), 2 feature-only steps (feature-welcome, feature-nav-project), 10 shared steps (nav-prompts → done). Steps carry `roles`, `availableIn`, `routePrefix`, `pollTimeout`, optional `stub`, and optional `skipIf(ctx)` predicate. |
 
 ---
 
@@ -401,11 +383,7 @@
 | Component | Description |
 |---|---|
 | [`AppShell.tsx`](src/components/AppShell.tsx) | Server component; fetches org name AND caller's memberships in parallel (`Promise.all`); exports `MembershipOption` shared type; passes `orgName`, `activeOrganisationId`, `memberships` to `AppShellClient`. PM4. |
-| [`AppShellClient.tsx`](src/components/AppShellClient.tsx) | Client component; full sidebar navigation (210px width); role-aware nav links (Dashboard, Teams, Prompts, Install, Admin sections for MANAGER/LINE_MANAGER); theme toggle; avatar with initials and role label; renders `<OrgBadge>` for the org chip. Wraps children in `<TourProvider>` for the onboarding tour engine. Teams NavLink wrapped in `data-tour="nav-teams"` div (Phase 5). |
-| [`tour/TourContext.ts`](src/components/tour/TourContext.ts) | `TourContext`, `useTour()` — React context for tour engine |
-| [`tour/TourOverlay.tsx`](src/components/tour/TourOverlay.tsx) | 4-sided dim overlay with spotlight cutout and teal ring; `pointer-events: none` on spotlight so real target stays clickable |
-| [`tour/TourTooltip.tsx`](src/components/tour/TourTooltip.tsx) | Tooltip card: step counter (IBM Plex Mono), instruction, Skip / Next buttons; positioned below/above target, clamped to viewport |
-| [`tour/TourProvider.tsx`](src/components/tour/TourProvider.tsx) | Full tour engine: `useReducer` state machine, DOM polling (200 ms / 3 s timeout), advance detection, `PATCH /api/me/onboarding` on complete/skip, portal rendering. Phase 5: reads `pulse-tour-kind` cookie to determine first-run vs feature mode; passes `(steps, role, tourMode, ctx)` to `filterSteps`; handles `element-appears` advance mode via DOM polling; clears `pulse-tour-kind` cookie on exit. |
+| [`AppShellClient.tsx`](src/components/AppShellClient.tsx) | Client component; full sidebar navigation (210px width); role-aware nav links (Dashboard, Teams, Prompts, Install, Admin sections for MANAGER/LINE_MANAGER); theme toggle; avatar with initials and role label; renders `<OrgBadge>` for the org chip. |
 | [`OrgBadge.tsx`](src/components/OrgBadge.tsx) | PM4. Client component. Single-membership users render the bare org chip (no affordance). Multi-membership users get a chevron + dropdown listbox with active row marker, Escape/click-outside dismissal. Selecting POSTs `/api/auth/switch-org` and on `res.ok` calls `router.refresh()` — never optimistic local state (cookie is the only source of truth). 401 → `router.push("/login")`; 403 → "Not a member"; other → "Switch failed". |
 | [`AppShellSignOut.tsx`](src/components/AppShellSignOut.tsx) | Client component; sign-out button that calls NextAuth `signOut` |
 | [`TrackingConsentModal.tsx`](src/components/TrackingConsentModal.tsx) | Client component; modal shown when `needsConsentModal()` returns true; posts to `/api/consents/acknowledge`; explains time tracking data collection scope |
@@ -537,8 +515,6 @@ All tests use **Vitest** with module mocking (`vi.mock`). Tests run against the 
 | `drift-baseline-route.test.ts` | `POST /api/projects/[id]/drift/baseline` — source resolution, SHA write, CONTEXT_BASELINE_SET audit, RBAC; LINE_MANAGER path |
 | `drift-assessment-get.test.ts` | `GET /api/projects/[id]/drift/[assessmentId]` — triple-scope (project + org + assessmentId), stale-reset side-effect, 404 cross-org |
 | `drift-phase6-audit-reset.test.ts` | Phase 6 integration: baseline reset (manual + auto), CONTEXT_BASELINE_SET audit writes, stale-RUNNING→ERROR transitions |
-| `debt-engines.test.ts` | `downloadAndExtract` (tmpDir creation, tarball path, HEAD fallback, error propagation) + `runSonarEngine` (env guard, per-project key, CE outcome handling, BLOCKER/CRITICAL severity mapping, null techDebtMinutes) + `deleteTmpdir` — 24 tests |
-| `debt-orchestrate.test.ts` | `triggerDebtScan` + `resetStaleRunningDebtScans` + `runDebtScanPipeline` (early-exit guards: scan-not-found, project-not-found, github_not_configured, github_installation_not_found, scan_capacity_exceeded; cross-tenant guard uses scan.organisationId; engine error paths; happy-path step transitions; findings/debtScore NOT stored; finally always releases slot + deletes tmpDir) — 24 tests |
 | `activity-rows.test.ts` | `computeActivityRows()` — maps ActivityEvent array to display rows; hookSource, feedSummary/manualText precedence, null user |
 | `ai-provider.test.ts` | `getAutoCallModel()` and `OPENROUTER_MODELS` — OpenRouter chain selection, Groq fallback when key absent |
 | `budget-today-cutoff.test.ts` | `parseTodayCutoff()` — timezone-aware "today" window from budget page searchParams; Dubai/UTC boundary tests |
@@ -549,8 +525,6 @@ All tests use **Vitest** with module mocking (`vi.mock`). Tests run against the 
 | `narrate-highlights.test.ts` | `filterHighlights()` — validates sourceEventId presence, rejects non-array input, deduplicates |
 | `project-time-window.test.ts` | `resolveTimeWindow()` — timezone-aware time window resolution; Dubai/UTC boundary |
 | `work-type-bar.test.ts` | `computeWorkTypeBuckets()` — classifies commits into bug/docs/build/test/feature buckets |
-| `tour-engine.test.ts` | Cookie utilities, `filterSteps`, `tourReducer` transitions, `TOUR_STEPS` structure — all pure lib layer; 28 tests |
-| `tour-steps.test.ts` | `TOUR_STEPS` inventory (25 steps, unique IDs, sentinel selectors), `filterSteps` per role/mode (first-run MANAGER 19, first-run LINE_MANAGER 16, feature MANAGER with-data 13, feature MANAGER no-data 20, feature LINE_MANAGER with-data 13, feature LINE_MANAGER no-data 17, MEMBER 0), `availableIn` classification, `skipIf` predicate evaluation, stub conditions, `routePrefix` coverage, `project-open` navigate-advance, `pollTimeout` values, `element-appears` advance mode |
 
 ---
 

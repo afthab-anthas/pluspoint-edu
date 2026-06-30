@@ -13,36 +13,35 @@ The Prisma client is generated to `src/generated/prisma`. The datasource provide
 |-------|------|-------|
 | id | String @id @default(cuid()) | |
 | name | String | |
-| anthropicApiKeyEnc | String? | AES-256-GCM encrypted Anthropic API key (IV+authTag+ciphertext, base64). Never returned to client. |
-| anthropicKeyHint | String? | Obscured hint shown to MANAGER on install page (e.g. `sk-ant-api0...abcd`). |
 | createdAt | DateTime @default(now()) | |
 | updatedAt | DateTime @updatedAt | |
 
-Relations: `memberships`, `teams`, `projects`, `prompts`, `activityEvents`, `intelligence`, `intelligenceHighlights`, `auditEntries`, `memberDailyTime`, `productiveRules`, `executiveSummaries`, `invitations`, `githubInstallations`, `userTokens`, `readinessSnapshots`, `codeHealthSnapshots`
+Relations: `users`, `teams`, `projects`, `prompts`, `activityEvents`, `intelligence`, `intelligenceHighlights`, `auditEntries`, `memberDailyTime`, `productiveRules`, `executiveSummaries`, `invitations`, `githubInstallations`, `userTokens`, `readinessSnapshots`, `codeHealthSnapshots`
 
 #### User
-Identity and credentials only. Organisation, role, and team assignment are in `Membership`. The `role`, `teamId`, `isLineManager`, and `organisationId` columns were dropped in PM6 (migration `20260622000001_drop_user_legacy_cols`).
-
 | Field | Type | Notes |
 |-------|------|-------|
 | id | String @id @default(cuid()) | |
 | email | String @unique | |
 | name | String | |
 | passwordHash | String | bcrypt hash |
-| isActive | Boolean @default(true) | login lockout |
+| role | Role @default(MEMBER) | MANAGER / LINE_MANAGER / MEMBER |
+| teamId | String? | nullable |
+| isLineManager | Boolean @default(false) | |
+| isActive | Boolean @default(true) | |
 | failedLogins | Int @default(0) | lockout counter |
 | lockedUntil | DateTime? | null = not locked |
 | sessionVersion | Int @default(0) | incremented on forced re-login |
 | bio | String? | |
 | jobTitle | String? | |
 | location | String? | |
-| hasOnboarded | Boolean @default(false) | tracks whether user has completed onboarding flow; read by AppShell server component and passed to AppShellClient as prop |
 | tenantKey | String? | |
+| organisationId | String | FK → Organisation |
 | createdAt | DateTime @default(now()) | |
 | updatedAt | DateTime @updatedAt | |
 
 #### Membership
-**Sole source of truth for role, team, and org assignment.** One row per `(user, organisation)` pair. `withAuthScoped` reads this table on every authenticated request to verify that the JWT's `activeOrganisationId` claim corresponds to a real membership; the row is the credential and the RBAC authority. Backfilled atomically by the PM2 migration; runtime writes added in PM3 (signup creates User+Membership in a `$transaction`; management routes write `role`/`teamId`/`isLineManager` exclusively to Membership). The `User.role/teamId/isLineManager/organisationId` columns were dropped in PM6.
+**Tenancy proof (PM3).** One row per `(user, organisation)` pair. `withAuthScoped` reads this table on every authenticated request to verify that the JWT's `activeOrganisationId` claim corresponds to a real membership; the row is the credential. Backfilled atomically by the PM2 migration; runtime writes added in PM3 (signup creates User+Membership in a `$transaction`; existing-user invitation acceptance updates `Membership.teamId/role`).
 
 | Field | Type | Notes |
 |-------|------|-------|
@@ -61,11 +60,11 @@ Identity and credentials only. Organisation, role, and team assignment are in `M
 @@index([organisationId])
 @@index([userId, status]) — PM5
 
-##### Invariants (PM6)
-- `Membership.count() === User.count()` (PM2 backfill invariant; signup keeps it true via `$transaction`).
-- `Membership` is the **sole authority** for `role`, `teamId`, and `isLineManager`. The corresponding `User` columns no longer exist (dropped in PM6).
+##### Invariants (PM3)
+- `Membership.count() === User.count()` post-migration (PM2 invariant; signup keeps it true).
+- Each row's `(organisationId, role, teamId, isLineManager)` exactly matches its source `User`'s columns at backfill time. After PM3, **Membership is authoritative** — `ctx.*` fields are sourced from Membership, not from `User.*`.
 - `withAuthScoped` returns `null` if no `Membership(session.user.id, session.user.activeOrganisationId)` row exists. The composite unique index is the lookup key.
-- `withAuthScoped` also returns `null` if the matching Membership row has `status !== "ACTIVE"`. A PENDING membership grants no authenticated access (PM5).
+- **PM5**: `withAuthScoped` also returns `null` if the matching Membership row has `status !== "ACTIVE"`. A PENDING membership grants no authenticated access.
 
 ##### Auth request flow (PM3)
 1. NextAuth's `auth()` decodes and signature-verifies the JWT.
@@ -149,7 +148,7 @@ Identity and credentials only. Organisation, role, and team assignment are in `M
 | gitCommitSha | String? | |
 | manualText | String? | redacted manual status text |
 | hookSource | String? | UserPromptSubmit / Stop / etc. |
-| feedSummary | String? | AI one-liner written async after Stop event (Anthropic Haiku primary, free model fallback) |
+| feedSummary | String? | Groq one-liner written async after Stop event |
 | redactionCount | Int @default(0) | number of redactions applied |
 | tenantKey | String? | |
 | organisationId | String | FK → Organisation |
@@ -282,53 +281,6 @@ One row per drift assessment trigger per project. Stores the outcome of comparin
 
 @@index([projectId, assessedAt])
 @@index([organisationId])
-
-### TechnicalDebtScan
-
-One record per scan invocation. State machine: PENDING → RUNNING → COMPLETE (or ERROR).
-
-| Field | Type | Purpose |
-|---|---|---|
-| `id` | `String` | CUID primary key |
-| `projectId` | `String` | Parent project (CASCADE delete) |
-| `organisationId` | `String` | Tenancy scope |
-| `status` | `TechDebtScanStatus` | PENDING / RUNNING / COMPLETE / ERROR |
-| `currentStep` | `TechDebtStep?` | Current pipeline step; null when PENDING or ERROR |
-| `sonarProjectKey` | `String?` | SonarQube project key (Phase B) |
-| `qualityGate` | `String?` | PASS / FAIL / N/A (Phase B) |
-| `reliabilityRating` | `String?` | A–E (Phase B) |
-| `securityRating` | `String?` | A–E (Phase B) |
-| `maintainabilityRating` | `String?` | A–E (Phase B) |
-| `techDebtMinutes` | `Int?` | SQALE technical debt in minutes (Phase B) |
-| `issueCount` | `Int?` | Total SonarQube issues BLOCKER+CRITICAL+MAJOR (Phase B) |
-| `findings` | `Json?` | AI synthesis findings array (Phase D) |
-| `findingsCount` | `Int?` | Total findings count |
-| `criticalCount` | `Int?` | SonarQube BLOCKER severity count (Phase B); UI note: "Critical" in Sonar = highCount |
-| `highCount` | `Int?` | SonarQube CRITICAL severity count (Phase B); UI note: "High" in Sonar = criticalCount |
-| `debtScore` | `Int?` | Composite 0–100 score (Phase D) |
-| `aiTokensUsed` | `Int?` | Tokens used by AI synthesis (Phase D) |
-| `costUSD` | `Float?` | AI synthesis cost (Phase D) |
-| `error` | `String?` | Error message when status = ERROR |
-| `scannedAt` | `DateTime` | Timestamp; set to completion time on COMPLETE |
-| `createdAt` | `DateTime` | Row creation (used for stale-run detection) |
-| `updatedAt` | `DateTime` | Last update |
-
-@@index([projectId, createdAt])
-@@index([organisationId])
-
-#### Technical Debt Scan — SYNTHESISING Step Data Flow (Phase D)
-
-After the SONAR step completes, the orchestrator enters the SYNTHESISING step:
-
-1. **Write raw Sonar data** — `blockerCount`, `criticalCount`, `majorCount`, `issueCount`, `qualityGate`, reliability/security/maintainability ratings, `techDebtMinutes` are written to the scan row at the start of SYNTHESISING, before any AI call. This ensures raw metrics survive even if synthesis fails.
-2. **Query latest SecurityScanRun** — `db.securityScanRun.findFirst({ where: { projectId, organisationId }, orderBy: { scannedAt: "desc" }, include: { findings: true } })` — org+project scoped, most recent run only.
-3. **Empty evidence fast-path** — if both `sonarIssues` (from `SonarEngineResult.issues`) and `securityFindings` are empty, `synthesiseDebtFindings` returns `{ findings: [], score: 100 }` without calling the AI.
-4. **Call `synthesiseDebtFindings({ organisationId, sonarIssues, securityFindings, detectedFrameworks })`** — ceiling-gated via `isCeilingExceeded` before the AI call. Builds a prompt from real Sonar issues + SecurityFindings + detected frameworks. Parses AI JSON response.
-5. **Anti-hallucination guards** — every AI finding is filtered: (a) `evidence.files` must be non-empty and at least one file must match a file from real Sonar issues or SecurityFindings (realFiles Set guard); (b) `priority` must be exactly one of `P1`/`P2`/`P3`/`P4` — others are dropped.
-6. **On failure** (ceiling exceeded or parse error) → scan marked ERROR; raw Sonar data written in step 1 is preserved.
-7. **On success** → `computeDebtScore(findings)` produces the deterministic `debtScore` → write COMPLETE with `findings (Json)`, `findingsCount`, `debtScore`, `aiTokensUsed`, `costUSD`.
-
-**Field distinction**: `issueCount` = total Sonar issues (written at SYNTHESISING step 1); `findingsCount` = count of AI P1–P4 findings (written at COMPLETE in step 7). These are distinct numbers.
 
 #### CodeHealthSnapshot
 One row per SonarQube scan invocation. Stores the output of `fetchSonarMetrics` after a `runSonarScanner` call. Added in migration `20260614000004_add_code_health_snapshot`; `scanSource` added in `20260615000001_add_code_health_scan_source`.
@@ -503,6 +455,9 @@ Source: [`prisma/schema.prisma`](prisma/schema.prisma)
 | Membership | @@index | [userId] |
 | Membership | @@index | [organisationId] |
 | Membership | @@index | [userId, status] — PM5 |
+| User | @@index | [teamId] |
+| User | @@index | [role] |
+| User | @@index | [organisationId] |
 | Team | @@index | [timeTrackingEnabled] |
 | Team | @@index | [organisationId] |
 | Project | @@index | [status] |
@@ -634,7 +589,7 @@ Source: [`src/app/api/ingest/event/route.ts`](src/app/api/ingest/event/route.ts:
 9. **Full Zod body validation** (`BodySchema.safeParse`). Reject 400 on failure.
 10. **Resolve `userId`**:
     - Per-developer tokens carry `userId` directly from `resolveAgentToken`.
-    - Legacy tokens (userId: null): if `userIdHint` email present, call `db.user.findFirst({ email, memberships: { some: { organisationId: project.organisationId, status: "ACTIVE" } } })`. Reject 400 `{ error: "user_not_found" }` if hint doesn't match.
+    - Legacy tokens (userId: null): if `userIdHint` email present, call `db.user.findFirst({ email, organisationId })`. Reject 400 `{ error: "user_not_found" }` if hint doesn't match.
     - If no hint and no userId: `userId` stays null.
 11. **Redaction** via [`redact()`](src/lib/redact.ts:10) applied to `sessionExcerpt`, `manualText`, `gitSummary`:
     - Strips: env-style secrets (`KEY=value`), JWTs (`eyJ...`), Anthropic keys (`sk-ant-`), OpenAI keys (`sk-` + 20+ chars), AWS keys (`AKIA`/`ASIA`), PEM private keys, URL credentials (`://user:pass@`).
@@ -644,8 +599,8 @@ Source: [`src/app/api/ingest/event/route.ts`](src/app/api/ingest/event/route.ts:
 13. **Persist `ActivityEvent`**:
     - If `sourceMessageUuid` present: `db.activityEvent.upsert({ where: { projectId_sourceMessageUuid }, create: eventData, update: {} })` — first write wins.
     - If absent: `db.activityEvent.create({ data: eventData })`.
-14. **Fire-and-forget narration**: fetches org Anthropic key via `getOrgAnthropicKey`, then calls `void generateNarration(event, project, traceCtx, anthropicApiKey)` — never blocks the 200 response.
-15. **Fire-and-forget feed summary** (Stop events only): if `hookSource === "Stop"` and `sessionExcerpt` present, fetches org Anthropic key via `getOrgAnthropicKey`, calls [`generateFeedSummary(excerpt, files, git, anthropicApiKey)`](src/lib/gemini.ts) (Anthropic Haiku primary, free model fallback, maxOutputTokens: 64). On success writes `feedSummary` to the event via `db.activityEvent.update`.
+14. **Fire-and-forget narration**: `void generateNarration(event, project, traceCtx)` — never blocks the 200 response.
+15. **Fire-and-forget feed summary** (Stop events only): if `hookSource === "Stop"` and `sessionExcerpt` present, calls [`generateFeedSummary(excerpt, files, git)`](src/lib/gemini.ts:18) (Groq Llama 3.3 70B, maxOutputTokens: 64). On success writes `feedSummary` to the event via `db.activityEvent.update`.
 16. **Respond 200** with `{ id: event.id }`.
 
 ---
@@ -773,7 +728,7 @@ Source: [`src/lib/narrate.ts`](src/lib/narrate.ts:143)
 
 6. System prompt (constant, defined at module level): instructs the model to write in plain English for a non-technical PM. Defines `stage` (`early`/`mid`/`hardening`/`blocked`), `riskLevel` (`LOW`/`MEDIUM`/`HIGH`), `riskFocus`, `headline` (8–12 words). Requires JSON output with keys: `headline`, `narration`, `stage`, `riskLevel`, `riskFocus`, `highlights` (array of `{ text, sourceEventId }` — sourceEventId must be from the events list in the user prompt).
 
-7. **AI API call**: `generateText({ model, system, messages: [{ role: "user", content: userPrompt }], maxOutputTokens: 1024 })` where `model` comes from `getAutoCallModel(anthropicApiKey)` — Anthropic Haiku primary, free model fallback. User prompt includes an explicit events list with IDs so the model can reference valid sourceEventIds.
+7. **Groq API call**: `generateText({ model: groqProvider("llama-3.3-70b-versatile"), system, messages: [{ role: "user", content: userPrompt }], maxOutputTokens: 1024 })`. User prompt includes an explicit events list with IDs so the model can reference valid sourceEventIds.
 
 8. **Parse JSON**: strips markdown code fences. Calls `JSON.parse()`. On failure: logs and returns without writing (`narration` never stored, no highlights). Parse failure is a clean no-op — no crash, no empty state.
 
@@ -788,7 +743,7 @@ Source: [`src/lib/narrate.ts`](src/lib/narrate.ts:143)
 ### Data Written
 
 - New `Intelligence` row with: `projectId`, `inputHash`, `headline`, `narration`, `stage`, `riskLevel`, `riskFocus`, `modelUsed`, `inputTokens`, `outputTokens`.
-- Zero or more `IntelligenceHighlight` rows linked via `intelligenceId` — only when the AI returns valid highlights with sourceEventIds that pass `filterHighlights`.
+- Zero or more `IntelligenceHighlight` rows linked via `intelligenceId` — only when Groq returns valid highlights with sourceEventIds that pass `filterHighlights`.
 - In-memory Prometheus counters: `_claudeInputTokens[projectId]`, `_claudeOutputTokens[projectId]`.
 
 ---
@@ -959,7 +914,7 @@ Source: [`src/lib/userToken.ts`](src/lib/userToken.ts:14)
 1. `preview = rawToken.slice(-4)`.
 2. `db.userToken.findMany({ where: { tokenPreview: preview }, select: { tokenHash, userId, organisationId } })`.
 3. bcrypt-verify each candidate.
-4. On match: `db.membership.findFirst({ where: { userId, organisationId, status: "ACTIVE" }, select: { teamId } })` — reads `teamId` from Membership (User.teamId was dropped in PM6).
+4. On match: `db.user.findUnique({ where: { id: userId }, select: { teamId } })`.
 5. Returns `{ valid: true, userId, organisationId, teamId }`.
 
 Token creation (`POST /api/install/user-token`): `db.userToken.upsert({ where: { userId }, create: { tokenHash, tokenPreview, userId, organisationId }, update: { tokenHash, tokenPreview } })`. Subsequent calls rotate — old hash immediately invalid. Raw token returned once.
@@ -1385,31 +1340,28 @@ All calls go through `authedGithubFetch(url, installationId)` which:
 
 Repo snapshot is stored as JSON in `Project.repoSnapshot` (max 8 KB). Key config excerpts are redacted before storage.
 
-### AI API (Narration)
+### Groq API (Narration)
 
 Source: [`src/lib/narrate.ts`](src/lib/narrate.ts)
 
-- Primary model: `claude-haiku-4-5-20251001` via `@ai-sdk/anthropic` when org Anthropic key is set.
-- Fallback: free OpenRouter models (`meta-llama/llama-3.3-70b-instruct:free` etc.) → Groq `llama-3.3-70b-versatile` when no Anthropic key.
-- Provider selection: `getAutoCallModel(anthropicApiKey)` from `src/lib/ai-provider.ts`.
+- Model: `llama-3.3-70b-versatile`
+- Provider: `@ai-sdk/groq` `createGroq({ apiKey: process.env.GROQ_API_KEY })`
 - Call: `generateText({ model, system: SYSTEM_PROMPT, messages: [{ role: "user", content: userPrompt }], maxOutputTokens: 512 })`
 - Expected response: JSON object with `headline`, `narration`, `stage`, `riskLevel`, `riskFocus`.
 - Markdown code fences stripped before `JSON.parse()`.
 - Usage stats (`inputTokens`, `outputTokens`) stored on the resulting `Intelligence` row.
 
-### AI API (Feed Summary)
+### Groq API (Feed Summary)
 
 Source: [`src/lib/gemini.ts`](src/lib/gemini.ts)
 
-- Primary model: `claude-haiku-4-5-20251001` via `@ai-sdk/anthropic` when org Anthropic key is set.
-- Fallback: same free model chain as narration.
-- Provider selection: `getAutoCallModel(anthropicApiKey)` from `src/lib/ai-provider.ts`.
-- Call: `generateText({ model, system: SYSTEM_PREFIX, messages: [{ role: "user", content }], maxOutputTokens: 64, temperature: 0.3 })`
+- Model: `llama-3.3-70b-versatile`
+- Provider: same `@ai-sdk/groq`
+- Call: `generateText({ model, prompt: systemPrefix + context + message, maxOutputTokens: 64, temperature: 0.3 })`
 - System prefix: "Write a 5-8 word action phrase describing what a developer accomplished. Be specific and concrete — always name the subsystem, file, or function touched."
 - Expected response: a single short phrase.
-- `validateFeedSummary` applied before accepting result; returns `null` on prompt echo, over-length, or structured output.
 - Result stored as `ActivityEvent.feedSummary`.
-- Falls back to `firstSentence(excerpt)` (first sentence up to 80 chars) if API call fails or returns null.
+- Falls back to `firstSentence(excerpt)` (first sentence up to 80 chars) if API call fails.
 
 ### Executive Summary (Groq Streaming)
 

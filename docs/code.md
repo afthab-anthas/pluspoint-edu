@@ -196,18 +196,17 @@ Rules applied in order (each increments `count` and adds to `kinds`):
 export async function generateNarration(
   event: ActivityEvent,
   project: Project,
-  traceCtx?: TraceContext,
-  anthropicApiKey?: string | null
+  traceCtx?: TraceContext
 ): Promise<void>
 ```
-- Model: `claude-haiku-4-5-20251001` via Anthropic (primary when `anthropicApiKey` set), falling back to free OpenRouter/Groq models via `getAutoCallModel`.
+- Model: `llama-3.3-70b-versatile` via Groq (`@ai-sdk/groq`).
 - `maxOutputTokens: 512`.
 - Gate 1 — delta hash dedup: computes `computeInputHash` over `(pNumberDetected, lastCommitSha, filesChangedBucket sorted, sessionExcerpt, gitSummary, eventKind, repoContextRefreshedAt)`. Skips if latest `Intelligence` row for the project has the same hash.
 - Gate 2 — cooldown: in-memory `Map<projectId, lastNarratedAt>`; skips if `< COOLDOWN_MS = 90_000 ms` since last narration. Cooldown is set **before** the API call to prevent concurrent bursts.
 - Fetches up to 3 recent `MANUAL_STATUS` events for context.
 - Optionally enriches with `MemberDailyTime` if `team.aiUsesTime === true`.
 - Optionally includes `repoSnapshot` (detected frameworks, top-level tree, key config paths) if `project.repoSnapshot != null`.
-- Strips markdown code fences from AI response before `JSON.parse`.
+- Strips markdown code fences from Groq response before `JSON.parse`.
 - Persists `Intelligence` row with: `headline`, `narration`, `stage`, `riskLevel`, `riskFocus`, `modelUsed`, `inputTokens`, `outputTokens`, `inputHash`, `triggeringEventId`, `organisationId`.
 - Calls `recordClaudeTokens(projectId, inputTokens, outputTokens)` after persist.
 - Never throws to caller — all errors logged via `console.error` and function returns `void`.
@@ -224,37 +223,24 @@ export function resetCooldowns(): void
 
 ---
 
-**[`src/lib/gemini.ts`](src/lib/gemini.ts)** (named `gemini` but uses Anthropic Haiku / free model fallback)
+**[`src/lib/gemini.ts`](src/lib/gemini.ts)** (named `gemini` but uses Groq)
 
 ```ts
 export async function generateFeedSummary(
   excerpt: string,
   filesChanged?: string[],
   gitSummary?: string | null,
-  anthropicApiKey?: string | null,
 ): Promise<string | null>
 ```
-- Model: `claude-haiku-4-5-20251001` via Anthropic (primary when `anthropicApiKey` set), falling back to free OpenRouter/Groq models. `maxOutputTokens: 64`. `temperature: 0.3`.
+- Model: `llama-3.3-70b-versatile` via Groq. `maxOutputTokens: 64`. `temperature: 0.3`.
 - Produces a 5–8 word action phrase (e.g. `"Fixed null reference in cost dashboard query"`).
-- Returns `null` if no Anthropic key and neither `OPENROUTER_API_KEY` nor `GROQ_API_KEY` is set.
+- Returns `null` if `GROQ_API_KEY` is unset.
 - Includes up to 6 file names and git summary as context.
-- User message explicitly instructs the model: `"Respond with ONLY the 5-8 word action phrase. No explanation, no preamble."` to reduce prompt-echo.
-- **Output validator** (`validateFeedSummary`) applied before returning any result. Returns `null` when:
-  - Output (case-insensitive) contains any of: `"action phrase"`, `"past-tense"`, `"passive voice"`, `"trailing punctuation"`, `"5-8 word"`, `"subsystem"` — indicates the model echoed the system prompt.
-  - Output starts with: `"we need to"`, `"write a"`, `"here is"`, `"here's"`, `"sure,"`, `"certainly"`, `"of course"`, `"note:"` — indicates preamble/meta commentary rather than the phrase.
-  - Output contains newlines or JSON braces — multi-line or structured output.
-  - Output exceeds 12 words or 90 characters.
-- Accepted output is clamped: trimmed, trailing punctuation stripped.
-- When `generateFeedSummary` returns `null`, the ingest route (`POST /api/ingest/event`) falls back to `firstSentence(excerpt)`.
 
 ```ts
-export function validateFeedSummary(text: string): string | null
-// Hard validator applied before returning any model output.
-// Returns cleaned phrase or null (caller falls back to firstSentence).
-
 export function firstSentence(text: string): string
 // Cuts at first [.!\n] or 80 chars; trims trailing partial word.
-// Used as fallback when generateFeedSummary returns null or throws.
+// Used as fallback when generateFeedSummary fails.
 ```
 
 ---
@@ -898,8 +884,7 @@ Pure:
 - `worstRating(...ratings: RatingLetter[]): RatingLetter` — returns the worst (highest-index) known rating; ignores N/A; all-N/A → "N/A"
 
 I/O:
-- `fetchSonarMetrics(projectKey, hostUrl, token): Promise<SonarMetrics>` — calls SonarQube REST API (`/api/measures/component`); fetches `reliability_rating`, `security_rating`, `sqale_rating`, `alert_status`, `coverage`, `duplicated_lines_density`, `sqale_index`; `SonarMetrics` includes `sqaleIndexMinutes: number | null` (tech-debt minutes); throws on non-OK HTTP
-- `fetchSonarIssues(projectKey, hostUrl, token): Promise<SonarIssue[]>` — calls `/api/issues/search?componentKeys=...&types=CODE_SMELL,BUG,VULNERABILITY&severities=BLOCKER,CRITICAL,MAJOR&ps=500`; strips `{projectKey}:` prefix from `component` to yield relative file path; `SonarIssue = { file, line: number|null, message, severity, ruleId }`; throws on non-OK HTTP
+- `fetchSonarMetrics(projectKey, hostUrl, token): Promise<SonarMetrics>` — calls SonarQube REST API (`/api/measures/component`); fetches `reliability_rating`, `security_rating`, `sqale_rating`, `alert_status`, `coverage`, `duplicated_lines_density`; throws on non-OK HTTP
 - `runSonarScanner(opts: { projectKey, scannerHostUrl, token, sourcesPath, sources?, timeoutMs? }): void` — runs `sonarsource/sonar-scanner-cli:latest` Docker container via `execSync`; mounts `sourcesPath` as `/usr/src`; stdio piped; default timeout 5 minutes; throws on non-zero exit
 - `downloadRepoTarball(opts: { repoFullName, ref, installationId, tarballPath }): Promise<void>` — fetches GitHub tarball via `authedGithubFetch`, streams to `tarballPath` using `pipeline(Readable.fromWeb(body), writeStream)`
 - `extractTarball(tarballPath, srcDir): void` — runs `tar xf ... --strip-components=1` via `execSync` to strip GitHub's top-level directory prefix
@@ -1003,74 +988,6 @@ export async function checkMemberCardRateLimit(userId: string): Promise<{ allowe
 - Upstash sliding-window 30 requests per 60 seconds per caller userId.
 - Upstash prefix: `pulse:admin:member-card`.
 - Fail-open on Upstash errors (standard convention).
-
----
-
-**[`src/lib/ratelimit-debt-scan.ts`](src/lib/ratelimit-debt-scan.ts)**
-
-```ts
-export async function checkDebtScanRateLimit(projectId: string): Promise<{ allowed: boolean }>
-```
-- Upstash sliding-window 1 request per 30 minutes per projectId.
-- Upstash prefix: `pulse:debt-scan`.
-- Fail-open on Upstash errors (standard convention).
-
----
-
-**[`src/lib/debt/orchestrate.ts`](src/lib/debt/orchestrate.ts)**
-
-```ts
-// TriggerResult = { ok: true; scanId: string } | { ok: false; reason: "project_not_found" | "already_running" }
-
-export async function triggerDebtScan(projectId: string, organisationId: string): Promise<TriggerResult>
-// Creates PENDING TechnicalDebtScan record + fires runDebtScanPipeline async (fire-and-forget).
-// Duplicate guard: returns { ok: false, reason: "already_running" } if a PENDING or RUNNING scan exists.
-
-export async function runDebtScanPipeline(scanId: string): Promise<void>
-// Phase B real-engine pipeline: load scan → project lookup → GitHub guard (github_not_configured) →
-// cross-tenant installation guard (github_installation_not_found, queries by scan.organisationId) →
-// concurrency slot (scan_capacity_exceeded, no releaseScanSlot if slot not acquired) →
-// RUNNING+DOWNLOADING → downloadAndExtract → SONAR → runSonarEngine →
-// SYNTHESISING (stores sonarProjectKey, ratings, techDebtMinutes, issue/critical/highCount;
-//   findings/debtScore stay null — Phase D) → COMPLETE+DONE+scannedAt.
-// catch: marks ERROR with err.message. finally: releaseScanSlot + deleteTmpdir (cleanup swallowed).
-
-export async function resetStaleRunningDebtScans(): Promise<number>
-// Sets RUNNING → ERROR for TechnicalDebtScan rows stuck for > STALE_RUNNING_MS (15 min).
-// Returns the count of rows updated.
-```
-
----
-
-**[`src/lib/debt/engines.ts`](src/lib/debt/engines.ts)**
-
-```ts
-export type ProjectForScan = {
-  id: string; name: string; githubRepoFullName: string;
-  githubInstallationId: string; repoMetadata: unknown; organisationId: string
-}
-
-export type SonarEngineResult = {
-  sonarProjectKey: string; qualityGate: string;
-  reliabilityRating: string; securityRating: string; maintainabilityRating: string;
-  techDebtMinutes: number | null; issueCount: number;
-  criticalCount: number   // BLOCKER severity issues
-  highCount: number       // CRITICAL severity issues
-}
-
-export async function downloadAndExtract(project: ProjectForScan): Promise<{ tmpDir: string; srcDir: string }>
-// Creates pulse-debt-scan-{id}-{ts} tmpDir; downloads GitHub tarball; extracts to srcDir.
-// repoMetadata.defaultBranch → ref; falls back to "HEAD" if absent.
-
-export async function runSonarEngine(srcDir: string, project: ProjectForScan): Promise<SonarEngineResult>
-// Reads SONAR_HOST_URL (REST), SONAR_SCANNER_HOST_URL (scanner), SONAR_ADMIN_TOKEN.
-// Per-project key: "debt-{orgId}-proj-{projId}" — distinct from code-health and axis-pulse self-scan keys.
-// ensureSonarProject → runSonarScannerAsync → waitForSonarCe → fetchSonarMetrics → fetchSonarIssues.
-// criticalCount = BLOCKER issues; highCount = CRITICAL issues (SonarQube severity naming).
-
-export function deleteTmpdir(tmpDir: string): void
-// rmSync(tmpDir, { recursive: true, force: true })
-```
 
 ---
 
@@ -1314,103 +1231,6 @@ Used by `CodeHealthRing` to drive the post-scan polling loop without blocking th
 
 ---
 
-### Onboarding Tour Engine
-
-**[`src/lib/tour/cookie.ts`](src/lib/tour/cookie.ts)**
-
-```ts
-// Step persistence — pulse-tour-step cookie
-export function readTourCookie(): string | null
-// Reads document.cookie for 'pulse-tour-step'; returns the step ID string or null.
-
-export function writeTourCookie(stepId: string): void
-// Sets document.cookie 'pulse-tour-step=<stepId>; max-age=86400; SameSite=Lax; path=/'
-
-export function clearTourCookie(): void
-// Removes the 'pulse-tour-step' cookie by setting max-age=0.
-
-// Tour-mode persistence — pulse-tour-kind cookie (Phase 5)
-export function readTourKindCookie(): "first-run" | "feature" | null
-// Reads document.cookie for 'pulse-tour-kind'; returns the tour mode or null (= default first-run).
-
-export function writeTourKindCookie(kind: "first-run" | "feature"): void
-// Sets document.cookie 'pulse-tour-kind=<kind>; max-age=86400; SameSite=Lax; path=/'
-
-export function clearTourKindCookie(): void
-// Removes the 'pulse-tour-kind' cookie by setting max-age=0.
-```
-
-**[`src/lib/tour/filter.ts`](src/lib/tour/filter.ts)**
-
-```ts
-export function filterSteps(
-  steps: TourStep[],
-  role: TourRole,
-  tourMode: "first-run" | "feature",
-  ctx: TourFilterCtx
-): TourStep[]
-// Returns steps that pass all three gates:
-//   1. roles gate: step.roles includes role (or roles is absent)
-//   2. availableIn gate: step.availableIn === tourMode (or availableIn is absent = both modes)
-//   3. skipIf gate: step.skipIf?.(ctx) is falsy (or skipIf is absent)
-```
-
-**[`src/lib/tour/reducer.ts`](src/lib/tour/reducer.ts)**
-
-```ts
-export function tourReducer(state: EngineState, action: EngineAction): EngineState
-// Pure state machine. Transitions:
-//   inactive + INIT(on route)     → polling
-//   inactive + INIT(off route)    → waiting
-//   polling  + TARGET_FOUND       → active
-//   polling  + TARGET_MISSING     → missing
-//   waiting  + ARRIVED_ON_ROUTE   → polling
-//   active   + ADVANCE(on route)  → polling
-//   active   + ADVANCE(off route) → waiting
-//   active/missing + EXIT         → inactive
-```
-
-**[`src/lib/tour/steps.ts`](src/lib/tour/steps.ts)**
-
-```ts
-export const TOUR_STEPS: TourStep[]
-// 21-step dual-tour inventory (Phase 5).
-// Structured as three groups:
-//   first-run only (9): welcome, dashboard-cta, teams-new-team, teams-modal,
-//     project-new-project, project-create-modal, project-token-copy,
-//     project-token-saved, project-open
-//   feature only (2): feature-welcome, feature-nav-project
-//   shared / both (10): nav-prompts, project-verdict, project-exceptions,
-//     project-spend-ring, project-code-health, project-feature-progress,
-//     project-repo-context, nav-cost-dashboard, nav-install, done
-// Step counts after filterSteps:
-//   first-run MANAGER 19, first-run LINE_MANAGER 16
-//   feature MANAGER 12, feature LINE_MANAGER 12
-//   MEMBER 0 (all steps require MANAGER or LINE_MANAGER)
-// TourStep fields:
-//   id, route, routePrefix?, selector, instruction, buttonText?,
-//   pollTimeout?, advance, roles?, availableIn?, stub?, skipIf?
-// Notable steps:
-//   project-token-copy   — pollTimeout: 120_000; advance.on = "element-appears"
-//                          (polls until [data-tour='project-token-copy'] appears in DOM)
-//   project-open         — advance { on: "navigate", to: "/projects/" } (prefix match)
-//   teams-modal          — advance { on: "navigate", to: "/teams/" }; spotlights dialog card
-//   project-create-modal — advance.on = "element-appears"; spotlights form card
-//   welcome / done       — sentinel selectors; tooltip centers (no spotlight)
-```
-
-**[`src/app/profile/_components/RetakeTourButton.tsx`](src/app/profile/_components/RetakeTourButton.tsx)**
-
-```ts
-// Client component. Calls PATCH /api/me/onboarding { hasOnboarded: false },
-// writes pulse-tour-kind=feature via writeTourKindCookie("feature"),
-// clears the pulse-tour-step cookie via clearTourCookie(), then
-// router.push("/dashboard") to launch the feature tour.
-export function RetakeTourButton(): JSX.Element
-```
-
----
-
 ## API Route Patterns
 
 ### Auth Guard Pattern
@@ -1561,8 +1381,8 @@ The dropdown affordance (chevron + button wrapper) is gated on `memberships.leng
 10. Redact `sessionExcerpt`, `manualText`, `gitSummary` through `redact()`.
 11. P-number matching via `matchPNumber(sessionExcerpt, activePrompts)` (primary Jaccard ≥ 0.6; secondary Jaccard ∈ [0.4, 0.6) + Dice bigram ≥ 0.7 — handles typos, British/American spelling drift).
 12. Persist `ActivityEvent` via `create` (no `sourceMessageUuid`) or `upsert` keyed on `(projectId, sourceMessageUuid)` with empty `update: {}` (first-write-wins idempotency).
-13. Fire-and-forget `generateNarration(event, project, traceCtx, anthropicApiKey)` (fetches org key via `getOrgAnthropicKey` first).
-14. Fire-and-forget Anthropic Haiku (or free model fallback) feed summary for `hookSource === "Stop"` events → updates `feedSummary` field.
+13. Fire-and-forget `generateNarration(event, project, traceCtx)`.
+14. Fire-and-forget Groq feed summary for `hookSource === "Stop"` events → updates `feedSummary` field.
 15. Return `{ id: event.id }` with status 200.
 
 ### Narration Pipeline (`generateNarration`)
@@ -1574,7 +1394,7 @@ The dropdown affordance (chevron + button wrapper) is gated on `memberships.leng
 5. Fetch up to 3 recent manual status events.
 6. Optionally fetch `MemberDailyTime` if `team.aiUsesTime === true`.
 7. Build user prompt from redacted event fields + optional repo context block.
-8. Call `getAutoCallModel(anthropicApiKey)` for model selection (Anthropic Haiku primary, free model fallback); `generateText`, `maxOutputTokens: 512`.
+8. Call Groq `llama-3.3-70b-versatile`, `maxOutputTokens: 512`.
 9. Strip markdown code fences from response; JSON.parse.
 10. Validate `parsed.narration` exists as string; log and return on failure.
 11. Persist `Intelligence` row; call `recordClaudeTokens`.

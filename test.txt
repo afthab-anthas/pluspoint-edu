@@ -1,0 +1,159 @@
+================================================================================
+  pluspoint-edu — Manual & Automated Test Specification
+  Laravel 11 / PHPUnit 11
+  Last updated: 2026-06-29
+================================================================================
+
+------------------------------------------------------------------------
+1. PAGES — Public Routes (no login required)
+------------------------------------------------------------------------
+
+TEST-001  Home page loads
+  GET /
+  Expected: HTTP 200, page renders without error
+
+TEST-002  About page loads
+  GET /about
+  Expected: HTTP 200, page renders without error
+
+TEST-003  Login page loads
+  GET /login
+  Expected: HTTP 200, contains login form
+
+TEST-004  Register page loads
+  GET /register
+  Expected: HTTP 200, contains registration form
+
+
+------------------------------------------------------------------------
+2. AUTH — Login
+------------------------------------------------------------------------
+
+TEST-010  Valid login redirects to dashboard
+  POST /login  { email: user@example.com, password: correct }
+  Expected: redirect to /home, session authenticated
+
+TEST-011  Wrong password is rejected
+  POST /login  { email: user@example.com, password: wrong }
+  Expected: redirect back with error on "email" field, guest session
+
+TEST-012  Non-existent email is rejected
+  POST /login  { email: nobody@example.com, password: anything }
+  Expected: redirect back with error on "email" field
+
+TEST-013  Empty fields are rejected
+  POST /login  { email: "", password: "" }
+  Expected: validation errors on both fields
+
+TEST-014  Logout ends the session
+  POST /logout  (authenticated)
+  Expected: redirect to /, session cleared, now guest
+
+
+------------------------------------------------------------------------
+3. AUTH — Registration
+------------------------------------------------------------------------
+
+TEST-020  New user can register
+  POST /register  { name, email (unique), password, password_confirmation }
+  Expected: redirect to /home, row in users table, password hashed
+
+TEST-021  Duplicate email is rejected
+  POST /register  { email: already@taken.com, ... }
+  Expected: validation error on "email" field, no new row created
+
+TEST-022  Password confirmation mismatch is rejected
+  POST /register  { password: abc, password_confirmation: xyz }
+  Expected: validation error on "password" field
+
+TEST-023  Missing required fields are rejected
+  POST /register  { name: "", email: "", password: "" }
+  Expected: validation errors on all required fields
+
+
+------------------------------------------------------------------------
+4. PROTECTED ROUTES (must be logged in)
+------------------------------------------------------------------------
+
+TEST-030  Unauthenticated access to /students redirects to login
+  GET /students  (guest)
+  Expected: redirect to /login
+
+TEST-031  Authenticated user can access /students
+  GET /students  (logged in)
+  Expected: HTTP 200
+
+TEST-032  Unauthenticated access to /account redirects to login
+  GET /account  (guest)
+  Expected: redirect to /login
+
+TEST-033  Authenticated user can access /account
+  GET /account  (logged in)
+  Expected: HTTP 200
+
+
+------------------------------------------------------------------------
+5. USER MODEL — Unit Tests
+------------------------------------------------------------------------
+
+TEST-040  Password is hashed on save
+  Create user with plain-text password
+  Expected: stored password != plain text, bcrypt_check passes
+
+TEST-041  Password is hidden from array/JSON output
+  user->toArray()
+  Expected: "password" and "remember_token" keys are absent
+
+TEST-042  Fillable fields accept mass assignment
+  User::create({ name, email, mobile, password })
+  Expected: all four fields persisted correctly
+
+TEST-043  User can be retrieved by email
+  User::where("email", x)->first()
+  Expected: returns the correct User model instance
+
+
+------------------------------------------------------------------------
+6. EDGE CASES & SECURITY
+------------------------------------------------------------------------
+
+TEST-050  XSS in name field is stored escaped
+  Register with name: <script>alert(1)</script>
+  Expected: stored as escaped string, not executed in browser
+
+TEST-051  SQL injection attempt in login is safely handled
+  POST /login  { email: "' OR '1'='1", password: "anything" }
+  Expected: normal login failure (no DB error, no bypass)
+
+TEST-052  Oversized input is rejected
+  POST /register  { name: (5000 chars), ... }
+  Expected: validation error, HTTP 422 or redirect with error
+
+TEST-053  Whitespace-only name is rejected
+  POST /register  { name: "   ", ... }
+  Expected: validation error on "name" field
+
+
+------------------------------------------------------------------------
+7. HOW TO RUN AUTOMATED TESTS
+------------------------------------------------------------------------
+
+  # Run all tests
+  php artisan test
+
+  # Run only Feature tests
+  php artisan test --testsuite=Feature
+
+  # Run only Unit tests
+  php artisan test --testsuite=Unit
+
+  # Run a specific test class
+  php artisan test --filter AuthTest
+
+  # Run with coverage report (requires Xdebug or PCOV)
+  php artisan test --coverage
+
+
+------------------------------------------------------------------------
+END OF TEST SPEC
+------------------------------------------------------------------------
